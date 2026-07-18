@@ -19,7 +19,7 @@ final class HomeViewModel {
     private(set) var isLoading = false
     private(set) var loadError: SupabaseError?
     var lastLogged: PintEntry?
-    /// The confirmation copy for the last log: "Pint logged. Cheers." or a welfare nudge (§3.7).
+    /// The confirmation copy for the last log.
     private(set) var confirmationMessage = WelfareMonitor.cheersMessage
     private(set) var lastWasWelfare = false
     init(container: AppContainer, profile: Profile) {
@@ -103,19 +103,15 @@ final class HomeViewModel {
         }
     }
 
-    /// Called after a successful log to refresh counts + standings, and to decide whether the
-    /// confirmation should be celebratory or a gentle welfare nudge (master prompt §3.7).
+    /// Called after a successful log to refresh counts + standings.
     func didLog(_ entry: PintEntry) async {
         lastLogged = entry
-        // `entries` still holds the *prior* entries here; WelfareMonitor adds the new one itself.
-        let recentDates = entries.filter { $0.countsTowardAlcoholTotals }.map(\.occurredAt)
-        let monitor = WelfareMonitor()
-        lastWasWelfare = monitor.tone(forEntryAt: entry.occurredAt, recentEntryDates: recentDates) == .welfare
-        confirmationMessage = monitor.message(forEntryAt: entry.occurredAt, recentEntryDates: recentDates)
-        if !lastWasWelfare, let beerName = BeerCatalog.beerName(in: entry.privateNote) {
+        lastWasWelfare = false
+        if let beerName = BeerCatalog.beerName(in: entry.privateNote) {
             confirmationMessage = "\(beerName) logged. The committee has been notified."
+        } else {
+            confirmationMessage = WelfareMonitor.cheersMessage
         }
-        if lastWasWelfare { Haptics.warning() }
         await load()
         await loadStandings()
     }
