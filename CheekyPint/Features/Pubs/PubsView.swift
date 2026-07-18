@@ -117,6 +117,13 @@ struct PubLiveMapView: View {
 
     private var nearbyList: some View {
         List {
+            if !pubs.isEmpty {
+                Text("\(pubs.count) closest pint options near you")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Palette.textSecondary)
+                    .listRowBackground(Color.clear)
+            }
+
             if pubs.isEmpty && !isLoading {
                 StatusView(
                     systemImage: location.status == .denied ? "location.slash.fill" : "map.fill",
@@ -165,11 +172,10 @@ struct PubLiveMapView: View {
                 latitudinalMeters: 4200,
                 longitudinalMeters: 4200
             ))
-            let found = try await container.pubs.search(matching: "pub bar brewery beer", near: current.coordinate)
-            pubs = Array(found.prefix(30))
+            pubs = try await container.pubs.nearbyPubs(near: current.coordinate, limit: 60)
             selectedPub = pubs.first
         } catch {
-            errorMessage = "Couldn't use your location. Unlock location access or try manual search."
+            errorMessage = "Couldn't get nearby pubs from your location. Try again outside or use manual search."
         }
     }
 

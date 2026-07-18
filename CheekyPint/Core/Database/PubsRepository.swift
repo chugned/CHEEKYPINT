@@ -33,29 +33,51 @@ private struct PubInsert: Encodable, Sendable {
 struct PubsRepository: Sendable {
     let data: SupabaseData
 
+    private static let nearbyPubQueries = [
+        "pub",
+        "bar",
+        "brewery",
+        "beer",
+        "beer garden",
+        "tavern",
+        "irish pub",
+        "craft beer",
+        "Biergarten",
+        "Brauerei",
+        "Wirtshaus",
+        "Gasthaus",
+        "Beisl",
+    ]
+
     /// Search nearby / by name+city. Region biases results when a coordinate is provided.
     func search(matching query: String, near coordinate: CLLocationCoordinate2D?) async throws -> [PubSearchResult] {
         if await DemoWorld.shared.isActive && coordinate == nil { return await DemoWorld.shared.pubSearch() }
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = query.isEmpty ? "pub" : query
-        if let coordinate {
-            request.region = MKCoordinateRegion(center: coordinate, latitudinalMeters: 6000, longitudinalMeters: 6000)
+        return try await mapKitSearch(matching: query.isEmpty ? "pub" : query, near: coordinate, radiusMeters: 6000)
+    }
+
+    /// A more exhaustive nearest-pub scan. Apple does not expose "every pub" as a single API
+    /// result, so this runs several local-search terms, merges duplicates, and sorts by distance.
+    func nearbyPubs(near coordinate: CLLocationCoordinate2D, limit: Int = 60) async throws -> [PubSearchResult] {
+        var collected: [PubSearchResult] = []
+        var firstError: Error?
+
+        for query in Self.nearbyPubQueries {
+            do {
+                let results = try await mapKitSearch(matching: query, near: coordinate, radiusMeters: 9000)
+                collected.append(contentsOf: results)
+            } catch {
+                firstError = firstError ?? error
+            }
         }
-        if #available(iOS 13.0, *) {
-            request.pointOfInterestFilter = MKPointOfInterestFilter(including: [.brewery, .restaurant, .nightlife])
+
+        let merged = deduplicated(collected)
+            .sorted { distance(from: coordinate, to: $0.coordinate) < distance(from: coordinate, to: $1.coordinate) }
+
+        if merged.isEmpty, let firstError {
+            throw firstError
         }
-        let response = try await MKLocalSearch(request: request).start()
-        return response.mapItems.map { item in
-            let placemark = item.placemark
-            return PubSearchResult(
-                name: item.name ?? placemark.name ?? "Pub",
-                address: placemark.title,
-                city: placemark.locality,
-                countryCode: placemark.isoCountryCode,
-                latitude: placemark.coordinate.latitude,
-                longitude: placemark.coordinate.longitude
-            )
-        }
+
+        return Array(merged.prefix(limit))
     }
 
     /// Find an existing matching pub or create one, returning the stable record to attach to a
@@ -85,5 +107,71 @@ struct PubsRepository: Sendable {
         let rows: [Pub] = try await data.insert("pubs", values: insert)
         guard let pub = rows.first else { throw SupabaseError.unknown("Pub not created") }
         return pub
+    }
+
+    private func mapKitSearch(
+        matching query: String,
+        near coordinate: CLLocationCoordinate2D?,
+        radiusMeters: CLLocationDistance
+    ) async throws -> [PubSearchResult] {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        if let coordinate {
+            request.region = MKCoordinateRegion(
+                center: coordinate,
+                latitudinalMeters: radiusMeters,
+                longitudinalMeters: radiusMeters
+            )
+        }
+        request.resultTypes = .pointOfInterest
+        request.pointOfInterestFilter = MKPointOfInterestFilter(including: [.brewery, .restaurant, .nightlife])
+
+        let response = try await MKLocalSearch(request: request).start()
+        return response.mapItems.compactMap { item in
+            let placemark = item.placemark
+            guard CLLocationCoordinate2DIsValid(placemark.coordinate) else { return nil }
+            return PubSearchResult(
+                name: item.name ?? placemark.name ?? "Pub",
+                address: placemark.title,
+                city: placemark.locality,
+                countryCode: placemark.isoCountryCode,
+                latitude: placemark.coordinate.latitude,
+                longitude: placemark.coordinate.longitude
+            )
+        }
+    }
+
+    private func deduplicated(_ results: [PubSearchResult]) -> [PubSearchResult] {
+        var kept: [PubSearchResult] = []
+        var seenKeys = Set<String>()
+
+        for result in results {
+            let key = dedupeKey(for: result)
+            if seenKeys.contains(key) { continue }
+            if kept.contains(where: { sameVenue($0, result) }) { continue }
+            seenKeys.insert(key)
+            kept.append(result)
+        }
+
+        return kept
+    }
+
+    private func dedupeKey(for result: PubSearchResult) -> String {
+        let normalizedName = result.name
+            .lowercased()
+            .filter { $0.isLetter || $0.isNumber }
+        let roundedLatitude = Int((result.latitude * 10_000).rounded())
+        let roundedLongitude = Int((result.longitude * 10_000).rounded())
+        return "\(normalizedName)-\(roundedLatitude)-\(roundedLongitude)"
+    }
+
+    private func sameVenue(_ lhs: PubSearchResult, _ rhs: PubSearchResult) -> Bool {
+        let namesMatch = lhs.name.compare(rhs.name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        return namesMatch && distance(from: lhs.coordinate, to: rhs.coordinate) < 90
+    }
+
+    private func distance(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> CLLocationDistance {
+        CLLocation(latitude: start.latitude, longitude: start.longitude)
+            .distance(from: CLLocation(latitude: end.latitude, longitude: end.longitude))
     }
 }

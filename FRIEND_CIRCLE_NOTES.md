@@ -55,5 +55,6 @@ that wants Associated Domains or Sign in with Apple back.
 ## Live Pub Map
 
 Open `Pubs` -> `Live pub map`. The screen asks for current location only when opened or refreshed,
-centres the map near the phone, drops mug markers for nearby venues, and lists results below the
-map with distance from the current location.
+centres the map near the phone, runs several MapKit searches for pub/bar/brewery/beer-garden/local
+terms, merges duplicate venues, drops mug markers for the closest results, and lists them below the
+map sorted by distance from the current location.
