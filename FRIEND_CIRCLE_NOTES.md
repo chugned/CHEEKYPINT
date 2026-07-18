@@ -26,8 +26,9 @@ The current catalog starts with image-backed beers:
 It then adds a larger international list covering common lagers, pilsners, wheat beers, stouts,
 IPAs, ales, and house-beer fallbacks from Europe, Asia, the Americas, Africa, and Oceania.
 Image-backed beers load from Wikimedia Commons via `Special:FilePath` URLs in
-`LogPintSheet.swift`; the rest render as styled in-app pint glasses so the catalog is not
-blocked by photo licensing.
+`LogPintSheet.swift`; every other beer renders generated bottle/can-and-glass artwork with its
+own label, style, and country so the catalog always has a picture without relying on unsafe
+hotlinked product photos.
 
 ## Build And Install
 

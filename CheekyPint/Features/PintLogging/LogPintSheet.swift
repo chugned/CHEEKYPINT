@@ -81,7 +81,7 @@ struct LogPintSheet: View {
                 .padding(.vertical, Theme.Spacing.xs)
             }
             .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-            Text("\(BeerCatalog.beers.count) beers loaded. Not literally all of Earth, but enough to start arguments.")
+            Text("\(BeerCatalog.beers.count) beers loaded. Every one has a picture; verified Commons photos load where available.")
                 .font(Theme.Typography.caption)
                 .foregroundStyle(Theme.Palette.textSecondary)
         }
@@ -514,22 +514,128 @@ private struct BeerCard: View {
     }
 
     private var fallbackImage: some View {
+        GeneratedBeerArtwork(beer: beer)
+    }
+}
+
+private struct GeneratedBeerArtwork: View {
+    let beer: BeerChoice
+
+    var body: some View {
         ZStack {
-            Theme.Palette.backgroundSecondary
-            PintGlass(fill: fallbackFill, edge: Theme.Palette.textPrimary)
-                .frame(width: 48, height: 82)
-            VStack {
-                Spacer()
-                Text(beer.style)
-                    .font(Theme.Typography.caption.weight(.semibold))
-                    .foregroundStyle(Theme.Palette.textSecondary)
-                    .lineLimit(1)
-                    .padding(.bottom, Theme.Spacing.xs)
+            LinearGradient(
+                colors: [palette.background.opacity(0.94), Theme.Palette.backgroundSecondary],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            VStack(spacing: Theme.Spacing.xs) {
+                HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
+                    package
+                    PintGlass(fill: fillLevel, edge: Theme.Palette.textPrimary)
+                        .frame(width: 42, height: 76)
+                        .shadow(color: palette.beer.opacity(0.32), radius: 8, y: 4)
+                }
+                .frame(maxWidth: .infinity)
+
+                VStack(spacing: 1) {
+                    Text(beer.name)
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Theme.Palette.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                    Text(beer.country.uppercased())
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.Palette.textSecondary)
+                        .lineLimit(1)
+                }
             }
+            .padding(Theme.Spacing.sm)
         }
     }
 
-    private var fallbackFill: CGFloat {
+    @ViewBuilder
+    private var package: some View {
+        if beer.style.lowercased().contains("ipa") || beer.name.lowercased().contains("light") {
+            can
+        } else {
+            bottle
+        }
+    }
+
+    private var bottle: some View {
+        ZStack(alignment: .bottom) {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(palette.package)
+                .frame(width: 36, height: 74)
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(palette.package)
+                .frame(width: 18, height: 98)
+            Capsule()
+                .fill(palette.cap)
+                .frame(width: 20, height: 7)
+                .offset(y: -92)
+            label
+                .frame(width: 32, height: 34)
+                .offset(y: -11)
+        }
+        .frame(width: 44, height: 102)
+        .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
+    }
+
+    private var can: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(palette.package)
+            VStack(spacing: 0) {
+                Capsule().fill(.white.opacity(0.45)).frame(height: 4)
+                Spacer()
+                Capsule().fill(.black.opacity(0.18)).frame(height: 4)
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 5)
+            label
+                .frame(width: 40, height: 42)
+        }
+        .frame(width: 48, height: 94)
+        .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
+    }
+
+    private var label: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(.white.opacity(0.88))
+            VStack(spacing: 1) {
+                Text(monogram)
+                    .font(.system(size: 13, weight: .black, design: .rounded))
+                    .foregroundStyle(palette.package)
+                    .lineLimit(1)
+                Rectangle()
+                    .fill(palette.beer.opacity(0.8))
+                    .frame(height: 2)
+                Text(shortStyle)
+                    .font(.system(size: 5.5, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.black.opacity(0.58))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+            }
+            .padding(4)
+        }
+    }
+
+    private var monogram: String {
+        let words = beer.name
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .prefix(2)
+        let letters = words.compactMap(\.first).map(String.init).joined()
+        return letters.isEmpty ? "CP" : letters.uppercased()
+    }
+
+    private var shortStyle: String {
+        beer.style.uppercased()
+    }
+
+    private var fillLevel: CGFloat {
         switch beer.style.lowercased() {
         case let style where style.contains("stout") || style.contains("brown"):
             return 0.92
@@ -540,6 +646,52 @@ private struct BeerCard: View {
         default:
             return 0.78
         }
+    }
+
+    private var palette: ArtworkPalette {
+        ArtworkPalette(beer: beer)
+    }
+}
+
+private struct ArtworkPalette {
+    let background: Color
+    let package: Color
+    let beer: Color
+    let cap: Color
+
+    init(beer: BeerChoice) {
+        let style = beer.style.lowercased()
+        let seed = abs(beer.id.hashValue)
+        let accent = Self.accent(seed: seed)
+        self.background = accent.opacity(0.2)
+        self.package = accent
+        self.cap = Color.white.opacity(0.82)
+
+        switch style {
+        case let value where value.contains("stout") || value.contains("brown"):
+            self.beer = Color(red: 0.18, green: 0.10, blue: 0.06)
+        case let value where value.contains("red") || value.contains("amber") || value.contains("bitter"):
+            self.beer = Color(red: 0.72, green: 0.32, blue: 0.13)
+        case let value where value.contains("wheat") || value.contains("wit"):
+            self.beer = Color(red: 0.95, green: 0.76, blue: 0.32)
+        case let value where value.contains("ipa") || value.contains("ale"):
+            self.beer = Color(red: 0.86, green: 0.49, blue: 0.16)
+        default:
+            self.beer = Theme.Palette.beer
+        }
+    }
+
+    private static func accent(seed: Int) -> Color {
+        let palette = [
+            Color(red: 0.11, green: 0.43, blue: 0.36),
+            Color(red: 0.55, green: 0.18, blue: 0.16),
+            Color(red: 0.18, green: 0.31, blue: 0.55),
+            Color(red: 0.42, green: 0.28, blue: 0.13),
+            Color(red: 0.35, green: 0.20, blue: 0.49),
+            Color(red: 0.56, green: 0.38, blue: 0.08),
+            Color(red: 0.12, green: 0.38, blue: 0.52),
+        ]
+        return palette[seed % palette.count]
     }
 }
 
