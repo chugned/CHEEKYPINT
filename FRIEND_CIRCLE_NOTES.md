@@ -8,12 +8,13 @@ This build is tuned for a private friend group rather than public auth.
 - The surname is stored locally on the phone and used as the local profile name.
 - The main pint action is now a beer glass image that fills as pints are recorded.
 - The logging sheet shows beers on display with remote glass photos and short descriptions.
+- The beer picker has a searchable world-style catalog with country/style metadata.
 - Tapping the fill control animates the glass; the pint is saved when the glass reaches full.
 - The saved private note includes the selected beer name, so the confirmation can call it out.
 
 ## Beer Display
 
-The current catalog includes:
+The current catalog starts with image-backed beers:
 
 - Puntigamer
 - Stiegl
@@ -22,7 +23,11 @@ The current catalog includes:
 - Guinness
 - Hoegaarden
 
-Images are loaded from Wikimedia Commons via `Special:FilePath` URLs in `LogPintSheet.swift`.
+It then adds a larger international list covering common lagers, pilsners, wheat beers, stouts,
+IPAs, ales, and house-beer fallbacks from Europe, Asia, the Americas, Africa, and Oceania.
+Image-backed beers load from Wikimedia Commons via `Special:FilePath` URLs in
+`LogPintSheet.swift`; the rest render as styled in-app pint glasses so the catalog is not
+blocked by photo licensing.
 
 ## Build And Install
 
