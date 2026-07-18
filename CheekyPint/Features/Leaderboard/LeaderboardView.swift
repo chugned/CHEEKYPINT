@@ -10,6 +10,8 @@ struct LeaderboardView: View {
 
     @State private var period: LeaderboardPeriod = .week
     @State private var rows: [LeaderboardRow] = []
+    @State private var activities: [UUID: FriendBeerActivity] = [:]
+    @State private var selectedActivity: FriendBeerActivity?
     @State private var isLoading = false
     @State private var error: SupabaseError?
 
@@ -45,11 +47,33 @@ struct LeaderboardView: View {
                        message: "Add a mate or log your first pub visit.")
         } else {
             List(rows) { row in
-                LeaderboardRowView(row: row, avatarURL: container.avatarURL(for: row.avatarPath))
+                if let activity = activities[row.id] {
+                    Button { selectedActivity = activity } label: {
+                        LeaderboardRowView(
+                            row: row,
+                            avatarURL: container.avatarURL(for: row.avatarPath),
+                            activity: activity
+                        )
+                    }
+                    .buttonStyle(.plain)
                     .listRowBackground(Theme.Palette.backgroundSecondary)
+                } else {
+                    LeaderboardRowView(
+                        row: row,
+                        avatarURL: container.avatarURL(for: row.avatarPath),
+                        activity: nil
+                    )
+                    .listRowBackground(Theme.Palette.backgroundSecondary)
+                }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .sheet(item: $selectedActivity) { activity in
+                FriendBeerActivityDetailView(
+                    activity: activity,
+                    avatarURL: container.avatarURL(for: activity.avatarPath)
+                )
+            }
         }
     }
 
@@ -57,11 +81,83 @@ struct LeaderboardView: View {
         isLoading = true; error = nil
         defer { isLoading = false }
         do {
-            rows = try await container.leaderboard.fullLeaderboard(period: period, profile: profile, session: activeSession)
+            async let leaderboardRows = container.leaderboard.fullLeaderboard(period: period, profile: profile, session: activeSession)
+            async let beerActivities = container.friendActivity.beerActivities()
+            rows = try await leaderboardRows
+            activities = try await Dictionary(uniqueKeysWithValues: beerActivities.map { ($0.userID, $0) })
         } catch let e as SupabaseError {
             error = e
         } catch {
             self.error = .unknown("Couldn't load standings.")
         }
+    }
+}
+
+private struct FriendBeerActivityDetailView: View {
+    let activity: FriendBeerActivity
+    let avatarURL: URL?
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack(spacing: Theme.Spacing.md) {
+                        RemoteAvatar(url: avatarURL, name: activity.displayName, size: 58)
+                        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                            Text(activity.displayName)
+                                .font(Theme.Typography.title)
+                                .foregroundStyle(Theme.Palette.textPrimary)
+                            Text(activity.nowText)
+                                .font(Theme.Typography.callout)
+                                .foregroundStyle(Theme.Palette.accent)
+                        }
+                    }
+                }
+
+                if let pubName = activity.currentPubName {
+                    Section("Right now") {
+                        Label(pubName, systemImage: "mappin.and.ellipse")
+                        if let currentBeerName = activity.currentBeerName {
+                            Label(currentBeerName, systemImage: "mug.fill")
+                        }
+                        if let address = activity.currentPubAddress {
+                            Text(address)
+                                .font(Theme.Typography.caption)
+                                .foregroundStyle(Theme.Palette.textSecondary)
+                        }
+                    }
+                }
+
+                Section("Beers") {
+                    ForEach(activity.recentLogs) { log in
+                        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                            Text(log.beerName)
+                                .font(Theme.Typography.headline)
+                                .foregroundStyle(Theme.Palette.textPrimary)
+                            if let pubName = log.pubName {
+                                Text(pubName)
+                                    .font(Theme.Typography.callout)
+                                    .foregroundStyle(Theme.Palette.accent)
+                            }
+                            Text(log.occurredAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(Theme.Typography.caption)
+                                .foregroundStyle(Theme.Palette.textSecondary)
+                        }
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.Palette.backgroundPrimary)
+            .navigationTitle("Beer intel")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }

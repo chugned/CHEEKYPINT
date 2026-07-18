@@ -73,7 +73,11 @@ struct HomeView: View {
                 logButton(model)
                 undoBanner(model)
                 periodSelector(model)
-                StandingsPreview(rows: model.standings, period: model.selectedPeriod)
+                StandingsPreview(
+                    rows: model.standings,
+                    period: model.selectedPeriod,
+                    activities: model.beerActivities
+                )
                     .onTapGesture { } // navigation below
                 NavigationLink {
                     LeaderboardView(profile: model.profile, activeSession: model.activeSession)

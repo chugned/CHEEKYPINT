@@ -21,6 +21,7 @@ struct AppContainer: Sendable {
     var diary: DiaryRepository { DiaryRepository(data: data) }
     var friends: FriendsRepository { FriendsRepository(data: data) }
     var leaderboard: LeaderboardRepository { LeaderboardRepository(data: data) }
+    var friendActivity: FriendActivityRepository { FriendActivityRepository(data: data) }
     var pubs: PubsRepository { PubsRepository(data: data) }
     var sessions: SessionsRepository { SessionsRepository(data: data) }
 
@@ -29,8 +30,7 @@ struct AppContainer: Sendable {
     /// Public URL for an avatar storage path (nil-safe). Used wherever a friend/leaderboard row
     /// carries an `avatarPath`.
     func avatarURL(for path: String?) -> URL? {
-        guard let path else { return nil }
-        return data.publicURL(bucket: "avatars", path: path)
+        profiles.avatarURL(for: path)
     }
 }
 

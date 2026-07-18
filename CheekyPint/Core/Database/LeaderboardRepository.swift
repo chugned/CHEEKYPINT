@@ -1,4 +1,5 @@
 import Foundation
+import CoreLocation
 import CheekyPintCore
 
 /// Fetches friend standings. The calendar-aware window is computed locally by the tested
@@ -41,5 +42,52 @@ struct LeaderboardRepository: Sendable {
     func preview(period: LeaderboardPeriod, profile: Profile, now: Date = Date(), session: PubSession?, topCount: Int = 3) async throws -> [LeaderboardRow] {
         if await DemoWorld.shared.isActive { return await DemoWorld.shared.leaderboard(period: period, topCount: topCount) }
         return LeaderboardBuilder().preview(try await participants(period: period, profile: profile, now: now, session: session), topCount: topCount)
+    }
+}
+
+struct FriendBeerLog: Identifiable, Sendable, Hashable {
+    let id: UUID
+    let beerName: String
+    let pubName: String?
+    let occurredAt: Date
+}
+
+struct FriendBeerActivity: Identifiable, Sendable, Hashable {
+    let userID: UUID
+    let displayName: String
+    let avatarPath: String?
+    let currentPubID: UUID?
+    let currentPubName: String?
+    let currentPubAddress: String?
+    let currentPubLatitude: Double?
+    let currentPubLongitude: Double?
+    let currentBeerName: String?
+    let recentLogs: [FriendBeerLog]
+
+    var id: UUID { userID }
+
+    var currentCoordinate: CLLocationCoordinate2D? {
+        guard let currentPubLatitude, let currentPubLongitude else { return nil }
+        return CLLocationCoordinate2D(latitude: currentPubLatitude, longitude: currentPubLongitude)
+    }
+
+    var nowText: String {
+        switch (currentBeerName, currentPubName) {
+        case let (beer?, pub?): return "\(beer) at \(pub)"
+        case let (beer?, nil): return "\(beer), pub unknown"
+        case let (nil, pub?): return "At \(pub)"
+        default: return "Not checked into a pub right now"
+        }
+    }
+}
+
+struct FriendActivityRepository: Sendable {
+    let data: SupabaseData
+
+    func beerActivities() async throws -> [FriendBeerActivity] {
+        if await DemoWorld.shared.isActive { return await DemoWorld.shared.friendBeerActivities() }
+        // Server mode currently exposes privacy-resolved totals only. Friend-circle/demo mode
+        // carries the richer beer/pub activity used by this private group build.
+        return []
     }
 }

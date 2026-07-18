@@ -14,6 +14,7 @@ final class HomeViewModel {
     private(set) var entries: [PintEntry] = []
     private(set) var totals: PersonalTotals = .init(session: nil, week: .zero, month: .zero, year: .zero)
     private(set) var standings: [LeaderboardRow] = []
+    private(set) var beerActivities: [UUID: FriendBeerActivity] = [:]
     private(set) var activeMembers: [SessionMember] = []
 
     private(set) var isLoading = false
@@ -62,10 +63,14 @@ final class HomeViewModel {
 
     func loadStandings() async {
         do {
-            standings = try await container.leaderboard.preview(
+            async let rows = container.leaderboard.preview(
                 period: selectedPeriod, profile: profile, session: activeSession)
+            async let activities = container.friendActivity.beerActivities()
+            standings = try await rows
+            beerActivities = try await Dictionary(uniqueKeysWithValues: activities.map { ($0.userID, $0) })
         } catch {
             standings = [] // standings are best-effort on Home; the tab shows full errors
+            beerActivities = [:]
         }
     }
 

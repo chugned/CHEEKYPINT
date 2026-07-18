@@ -51,6 +51,7 @@ struct PubLiveMapView: View {
     @State private var location = LocationService()
     @State private var userCoordinate: CLLocationCoordinate2D?
     @State private var pubs: [PubSearchResult] = []
+    @State private var friendActivities: [FriendBeerActivity] = []
     @State private var selectedPub: PubSearchResult?
     @State private var detailPub: PubSearchResult?
     @State private var position: MapCameraPosition = .automatic
@@ -77,6 +78,7 @@ struct PubLiveMapView: View {
         }
         .task {
             if pubs.isEmpty && !isLoading {
+                await loadFriendActivity()
                 await refresh()
             }
         }
@@ -96,6 +98,26 @@ struct PubLiveMapView: View {
                     Marker(pub.name, systemImage: "mug.fill", coordinate: pub.coordinate)
                         .tint(Theme.Palette.accent)
                         .tag(pub)
+                }
+                ForEach(friendActivitiesWithCoordinates) { activity in
+                    if let coordinate = activity.currentCoordinate {
+                        Annotation(activity.displayName, coordinate: coordinate) {
+                            VStack(spacing: 2) {
+                                Image(systemName: "person.crop.circle.badge.checkmark")
+                                    .font(.title2)
+                                    .foregroundStyle(.white)
+                                    .padding(6)
+                                    .background(Theme.Palette.warning, in: Circle())
+                                Text(activity.displayName)
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(Theme.Palette.textPrimary)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(.ultraThinMaterial, in: Capsule())
+                            }
+                            .accessibilityLabel("\(activity.displayName), \(activity.nowText)")
+                        }
+                    }
                 }
             }
             .mapControls {
@@ -141,6 +163,24 @@ struct PubLiveMapView: View {
                 )
             }
 
+            if !friendActivities.isEmpty {
+                Section("Mates right now") {
+                    ForEach(friendActivities) { activity in
+                        Button {
+                            if let coordinate = activity.currentCoordinate {
+                                focus(on: coordinate)
+                            }
+                        } label: {
+                            FriendActivityMapRow(
+                                activity: activity,
+                                avatarURL: container.avatarURL(for: activity.avatarPath)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
             ForEach(sortedPubs) { pub in
                 Button {
                     selectedPub = pub
@@ -167,12 +207,17 @@ struct PubLiveMapView: View {
         }
     }
 
+    private var friendActivitiesWithCoordinates: [FriendBeerActivity] {
+        friendActivities.filter { $0.currentCoordinate != nil }
+    }
+
     private func refresh() async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
 
         do {
+            await loadFriendActivity()
             let current = try await location.requestOneShotLocation()
             userCoordinate = current.coordinate
             position = .region(MKCoordinateRegion(
@@ -193,6 +238,18 @@ struct PubLiveMapView: View {
             latitudinalMeters: 900,
             longitudinalMeters: 900
         ))
+    }
+
+    private func focus(on coordinate: CLLocationCoordinate2D) {
+        position = .region(MKCoordinateRegion(
+            center: coordinate,
+            latitudinalMeters: 900,
+            longitudinalMeters: 900
+        ))
+    }
+
+    private func loadFriendActivity() async {
+        friendActivities = (try? await container.friendActivity.beerActivities()) ?? []
     }
 
     private func distanceText(to pub: PubSearchResult) -> String? {
@@ -410,6 +467,43 @@ private struct PubMapRow: View {
                         .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.Palette.textSecondary)
                         .lineLimit(2)
+                }
+            }
+        }
+        .padding(.vertical, Theme.Spacing.xs)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct FriendActivityMapRow: View {
+    let activity: FriendBeerActivity
+    let avatarURL: URL?
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            RemoteAvatar(url: avatarURL, name: activity.displayName, size: 38)
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                HStack {
+                    Text(activity.displayName)
+                        .font(Theme.Typography.headline)
+                        .foregroundStyle(Theme.Palette.textPrimary)
+                    Spacer()
+                    if activity.currentCoordinate != nil {
+                        Image(systemName: "location.fill")
+                            .font(.caption)
+                            .foregroundStyle(Theme.Palette.accent)
+                            .accessibilityHidden(true)
+                    }
+                }
+                Text(activity.nowText)
+                    .font(Theme.Typography.caption.weight(.semibold))
+                    .foregroundStyle(Theme.Palette.accent)
+                    .lineLimit(2)
+                if let latest = activity.recentLogs.first {
+                    Text("Last: \(latest.beerName)\(latest.pubName.map { " at \($0)" } ?? "")")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Palette.textSecondary)
+                        .lineLimit(1)
                 }
             }
         }

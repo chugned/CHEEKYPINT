@@ -19,6 +19,10 @@ This build is tuned for a private friend group rather than public auth.
   for Apple Maps, website, and phone.
 - The Profile tab now has a direct edit button for changing your friend-circle nickname and
   profile picture. In surname-only mode the photo is stored locally on the phone.
+- The leaderboard and home standings preview show each mate's current pub/current beer plus
+  recent beer-and-pub history. Tapping a full leaderboard row opens the detailed beer log.
+- The live pub map shows mate markers at their current pubs and includes a `Mates right now`
+  section that can focus the map on where each person is drinking.
 
 ## Beer Display
 
