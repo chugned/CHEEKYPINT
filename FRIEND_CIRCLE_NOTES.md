@@ -14,6 +14,9 @@ This build is tuned for a private friend group rather than public auth.
 - The saved private note includes the selected beer name, so the confirmation can call it out.
 - The Pubs tab includes a live pub map based on current location, using on-demand When-In-Use
   location and MapKit local search for nearby pubs, bars, breweries, and beer-friendly venues.
+- Tapping a live-map pub marker or pub row opens a detail sheet with the pub name, address,
+  distance, Apple Look Around imagery when Apple has it, a fallback image state, and quick actions
+  for Apple Maps, website, and phone.
 
 ## Beer Display
 
@@ -59,3 +62,7 @@ Open `Pubs` -> `Live pub map`. The screen asks for current location only when op
 centres the map near the phone, runs several MapKit searches for pub/bar/brewery/beer-garden/local
 terms, merges duplicate venues, drops mug markers for the closest results, and lists them below the
 map sorted by distance from the current location.
+
+Tap a pub marker or a row to see the pub details. Apple MapKit does not expose opening-hours data
+to this app build, so the sheet links straight to Apple Maps and the pub website/phone when those
+are provided by the map result for live opening times.

@@ -22,10 +22,10 @@ struct HomeView: View {
             .pubBackground()
             .navigationBarTitleDisplayMode(.inline)
         }
-        .overlay {
+        .fullScreenCover(isPresented: celebrationBinding) {
             if let model, model.showCelebration {
                 PintPourView { model.showCelebration = false }
-                    .transition(.opacity)
+                    .presentationBackground(.clear)
             }
         }
         .animation(.easeInOut(duration: 0.25), value: model?.showCelebration)
@@ -36,6 +36,17 @@ struct HomeView: View {
                 await vm.onAppear()
             }
         }
+    }
+
+    private var celebrationBinding: Binding<Bool> {
+        Binding(
+            get: { model?.showCelebration == true },
+            set: { isPresented in
+                if !isPresented {
+                    model?.showCelebration = false
+                }
+            }
+        )
     }
 
     @ViewBuilder

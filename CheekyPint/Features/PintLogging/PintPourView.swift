@@ -44,22 +44,23 @@ struct PintPourView: View {
     private func overflow(in size: CGSize) -> some View {
         ZStack {
             beerPanel
-                .frame(width: size.width, height: flood ? size.height : 0)
-                .frame(maxHeight: .infinity, alignment: .top)
+                .frame(width: size.width, height: size.height)
+                .scaleEffect(x: 1, y: flood ? 1 : 0.001, anchor: .top)
 
             beerPanel
-                .frame(width: size.width, height: flood ? size.height : 0)
-                .frame(maxHeight: .infinity, alignment: .bottom)
+                .frame(width: size.width, height: size.height)
+                .scaleEffect(x: 1, y: flood ? 1 : 0.001, anchor: .bottom)
 
             beerPanel
-                .frame(width: flood ? size.width : 0, height: size.height)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: size.width, height: size.height)
+                .scaleEffect(x: flood ? 1 : 0.001, y: 1, anchor: .leading)
 
             beerPanel
-                .frame(width: flood ? size.width : 0, height: size.height)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                .frame(width: size.width, height: size.height)
+                .scaleEffect(x: flood ? 1 : 0.001, y: 1, anchor: .trailing)
         }
         .frame(width: size.width, height: size.height)
+        .clipped()
     }
 
     private var beerPanel: some View {

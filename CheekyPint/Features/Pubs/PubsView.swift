@@ -52,6 +52,7 @@ struct PubLiveMapView: View {
     @State private var userCoordinate: CLLocationCoordinate2D?
     @State private var pubs: [PubSearchResult] = []
     @State private var selectedPub: PubSearchResult?
+    @State private var detailPub: PubSearchResult?
     @State private var position: MapCameraPosition = .automatic
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -78,6 +79,12 @@ struct PubLiveMapView: View {
             if pubs.isEmpty && !isLoading {
                 await refresh()
             }
+        }
+        .onChange(of: selectedPub) { _, pub in
+            if let pub { detailPub = pub }
+        }
+        .sheet(item: $detailPub) { pub in
+            PubLiveDetailSheet(pub: pub, userCoordinate: userCoordinate)
         }
     }
 
@@ -138,6 +145,7 @@ struct PubLiveMapView: View {
                 Button {
                     selectedPub = pub
                     focus(on: pub)
+                    detailPub = pub
                 } label: {
                     PubMapRow(
                         pub: pub,
@@ -173,7 +181,7 @@ struct PubLiveMapView: View {
                 longitudinalMeters: 4200
             ))
             pubs = try await container.pubs.nearbyPubs(near: current.coordinate, limit: 60)
-            selectedPub = pubs.first
+            selectedPub = nil
         } catch {
             errorMessage = "Couldn't get nearby pubs from your location. Try again outside or use manual search."
         }
@@ -199,6 +207,177 @@ struct PubLiveMapView: View {
     private func distance(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> CLLocationDistance {
         CLLocation(latitude: start.latitude, longitude: start.longitude)
             .distance(from: CLLocation(latitude: end.latitude, longitude: end.longitude))
+    }
+}
+
+private struct PubLiveDetailSheet: View {
+    let pub: PubSearchResult
+    let userCoordinate: CLLocationCoordinate2D?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var lookAroundScene: MKLookAroundScene?
+    @State private var lookAroundLoaded = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    lookAroundPanel
+                    identityPanel
+                    openingTimesPanel
+                    actionPanel
+                    miniMap
+                }
+                .padding(Theme.Spacing.lg)
+            }
+            .pubBackground()
+            .navigationTitle(pub.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task(id: pub.id) { await loadLookAround() }
+        }
+        .presentationDetents([.large])
+    }
+
+    @ViewBuilder
+    private var lookAroundPanel: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Text("Inside check")
+                .font(Theme.Typography.headline)
+                .foregroundStyle(Theme.Palette.textPrimary)
+
+            if let scene = lookAroundScene {
+                LookAroundPreview(scene: .constant(scene))
+                    .frame(height: 230)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+            } else {
+                ZStack {
+                    Theme.Palette.backgroundSecondary
+                    VStack(spacing: Theme.Spacing.sm) {
+                        Image(systemName: lookAroundLoaded ? "photo.on.rectangle.angled" : "hourglass")
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.beer)
+                        Text(lookAroundLoaded ? "No Apple Look Around image for this pub yet." : "Loading pub image")
+                            .font(Theme.Typography.callout)
+                            .foregroundStyle(Theme.Palette.textSecondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(Theme.Spacing.md)
+                }
+                .frame(height: 230)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+            }
+        }
+    }
+
+    private var identityPanel: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Text(pub.name)
+                .font(Theme.Typography.largeTitle)
+                .foregroundStyle(Theme.Palette.textPrimary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.78)
+
+            if let address = pub.address {
+                Label(address, systemImage: "mappin")
+                    .font(Theme.Typography.callout)
+                    .foregroundStyle(Theme.Palette.textSecondary)
+            }
+
+            if let distanceText {
+                Label(distanceText, systemImage: "figure.walk")
+                    .font(Theme.Typography.callout)
+                    .foregroundStyle(Theme.Palette.accent)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var openingTimesPanel: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            Label("Opening times", systemImage: "clock.fill")
+                .font(Theme.Typography.headline)
+                .foregroundStyle(Theme.Palette.textPrimary)
+            Text("Apple Maps does not provide opening hours to this build. Use Maps or the pub website for live hours before walking over.")
+                .font(Theme.Typography.callout)
+                .foregroundStyle(Theme.Palette.textSecondary)
+        }
+        .coasterCard()
+    }
+
+    private var actionPanel: some View {
+        VStack(spacing: Theme.Spacing.sm) {
+            Button {
+                openInMaps()
+            } label: {
+                Label("Open in Apple Maps", systemImage: "map.fill")
+            }
+            .buttonStyle(PintButtonStyle())
+
+            if let url = pub.url {
+                Link(destination: url) {
+                    Label("Open pub website", systemImage: "safari.fill")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+            }
+
+            if let phoneURL {
+                Link(destination: phoneURL) {
+                    Label("Call pub", systemImage: "phone.fill")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+            }
+        }
+    }
+
+    private var miniMap: some View {
+        Map(initialPosition: .region(MKCoordinateRegion(
+            center: pub.coordinate,
+            latitudinalMeters: 700,
+            longitudinalMeters: 700
+        ))) {
+            Marker(pub.name, systemImage: "mug.fill", coordinate: pub.coordinate)
+                .tint(Theme.Palette.accent)
+            UserAnnotation()
+        }
+        .frame(height: 190)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+    }
+
+    private var distanceText: String? {
+        guard let userCoordinate else { return nil }
+        let meters = CLLocation(latitude: userCoordinate.latitude, longitude: userCoordinate.longitude)
+            .distance(from: CLLocation(latitude: pub.latitude, longitude: pub.longitude))
+        if meters < 1000 { return "\(Int(meters.rounded())) m away" }
+        return String(format: "%.1f km away", meters / 1000)
+    }
+
+    private var phoneURL: URL? {
+        guard let phone = pub.phoneNumber else { return nil }
+        let digits = phone.filter { $0.isNumber || $0 == "+" }
+        guard !digits.isEmpty else { return nil }
+        return URL(string: "tel://\(digits)")
+    }
+
+    private func loadLookAround() async {
+        lookAroundLoaded = false
+        lookAroundScene = nil
+        let request = MKLookAroundSceneRequest(coordinate: pub.coordinate)
+        lookAroundScene = try? await request.scene
+        lookAroundLoaded = true
+    }
+
+    private func openInMaps() {
+        let placemark = MKPlacemark(coordinate: pub.coordinate)
+        let item = MKMapItem(placemark: placemark)
+        item.name = pub.name
+        item.openInMaps(launchOptions: [
+            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking
+        ])
     }
 }
 

@@ -11,6 +11,28 @@ struct PubSearchResult: Identifiable, Sendable, Hashable {
     let countryCode: String?
     let latitude: Double
     let longitude: Double
+    let phoneNumber: String?
+    let url: URL?
+
+    init(
+        name: String,
+        address: String?,
+        city: String?,
+        countryCode: String?,
+        latitude: Double,
+        longitude: Double,
+        phoneNumber: String? = nil,
+        url: URL? = nil
+    ) {
+        self.name = name
+        self.address = address
+        self.city = city
+        self.countryCode = countryCode
+        self.latitude = latitude
+        self.longitude = longitude
+        self.phoneNumber = phoneNumber
+        self.url = url
+    }
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
@@ -127,7 +149,7 @@ struct PubsRepository: Sendable {
         request.pointOfInterestFilter = MKPointOfInterestFilter(including: [.brewery, .restaurant, .nightlife])
 
         let response = try await MKLocalSearch(request: request).start()
-        return response.mapItems.compactMap { item in
+        return response.mapItems.compactMap { item -> PubSearchResult? in
             let placemark = item.placemark
             guard CLLocationCoordinate2DIsValid(placemark.coordinate) else { return nil }
             return PubSearchResult(
@@ -136,7 +158,9 @@ struct PubsRepository: Sendable {
                 city: placemark.locality,
                 countryCode: placemark.isoCountryCode,
                 latitude: placemark.coordinate.latitude,
-                longitude: placemark.coordinate.longitude
+                longitude: placemark.coordinate.longitude,
+                phoneNumber: item.phoneNumber,
+                url: item.url
             )
         }
     }
