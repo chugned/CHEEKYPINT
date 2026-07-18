@@ -27,6 +27,11 @@ final class HomeViewModel {
         self.profile = profile
     }
 
+    func syncProfile(_ profile: Profile) {
+        self.profile = profile
+        recomputeTotals()
+    }
+
     func onAppear() async {
         // Default the period to the active session when there is one.
         await load()

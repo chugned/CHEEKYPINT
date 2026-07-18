@@ -40,6 +40,11 @@ struct HomeView: View {
                 await vm.onAppear()
             }
         }
+        .onChange(of: session.currentProfile) { _, profile in
+            if let profile {
+                model?.syncProfile(profile)
+            }
+        }
     }
 
     private func queuePourCelebration() {

@@ -9,6 +9,8 @@ import CheekyPintCore
 /// so logging a pint really updates your totals and standings.
 actor DemoWorld {
     static let shared = DemoWorld()
+    private static let nicknameKey = "CheekyPint.friendCircleNickname"
+    private static let avatarPathKey = "CheekyPint.friendCircleAvatarPath"
 
     private(set) var isActive = false
 
@@ -63,9 +65,14 @@ actor DemoWorld {
 
     private func configureProfile(for surname: String?) {
         let clean = surname?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let displayName = clean.flatMap { $0.isEmpty ? nil : $0 } ?? "Alice"
+        let savedNickname = UserDefaults.standard.string(forKey: Self.nicknameKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = savedNickname.flatMap { $0.isEmpty ? nil : $0 }
+            ?? clean.flatMap { $0.isEmpty ? nil : $0 }
+            ?? "Alice"
         profile.displayName = displayName
         profile.username = Self.username(from: displayName)
+        profile.avatarPath = UserDefaults.standard.string(forKey: Self.avatarPathKey)
         profile.bio = "Surname entered. Dignity optional."
         profile.legalAgeConfirmedAt = Date()
         profile.timezone = TimeZone.current.identifier
@@ -86,9 +93,16 @@ actor DemoWorld {
     func fetchPrivacy() -> PrivacySettings { privacy }
 
     func updateProfile(_ update: ProfileUpdate) -> Profile {
-        if let v = update.displayName { profile.displayName = v }
+        if let v = update.displayName {
+            profile.displayName = v
+            UserDefaults.standard.set(v, forKey: Self.nicknameKey)
+        }
         if let v = update.username { profile.username = v }
         if let v = update.bio { profile.bio = v }
+        if let v = update.avatarPath {
+            profile.avatarPath = v
+            UserDefaults.standard.set(v, forKey: Self.avatarPathKey)
+        }
         if let v = update.city { profile.city = v }
         return profile
     }
@@ -173,7 +187,13 @@ actor DemoWorld {
         let barnaby = LeaderboardParticipant(id: Self.barnabyID, displayName: "Barnaby", total: friendTotal(perPeriod(period, 1, 4, 11, 47)))
         let ceri = LeaderboardParticipant(id: Self.ceriID, displayName: "Ceri",
             total: period == .week ? nil : friendTotal(perPeriod(period, 0, 3, 9, 38)))
-        let me = LeaderboardParticipant(id: Self.aliceID, displayName: "Alice", isCurrentUser: true, total: myTotal)
+        let me = LeaderboardParticipant(
+            id: Self.aliceID,
+            displayName: profile.displayName,
+            avatarPath: profile.avatarPath,
+            isCurrentUser: true,
+            total: myTotal
+        )
 
         let builder = LeaderboardBuilder()
         if let topCount { return builder.preview([me, barnaby, ceri], topCount: topCount) }

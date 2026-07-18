@@ -98,7 +98,11 @@ struct ProfileRepository: Sendable {
     /// Upload a resized JPEG avatar into the caller's own folder and point the profile at it.
     @discardableResult
     func uploadAvatar(_ jpeg: Data) async throws -> String {
-        if await DemoWorld.shared.isActive { return "demo/avatar.jpg" }
+        if await DemoWorld.shared.isActive {
+            let path = try Self.writeLocalAvatar(jpeg)
+            _ = await DemoWorld.shared.updateProfile(ProfileUpdate(avatarPath: path))
+            return path
+        }
         let id = try await uid()
         let path = "\(id)/\(UUID().uuidString).jpg"
         _ = try await data.uploadObject(bucket: "avatars", path: path, data: jpeg, contentType: "image/jpeg")
@@ -109,6 +113,24 @@ struct ProfileRepository: Sendable {
     /// Public URL for an avatar path (nil-safe).
     func avatarURL(for path: String?) -> URL? {
         guard let path else { return nil }
+        if path.hasPrefix(Self.localAvatarPrefix) {
+            return Self.localAvatarDirectory().appendingPathComponent(String(path.dropFirst(Self.localAvatarPrefix.count)))
+        }
         return data.publicURL(bucket: "avatars", path: path)
+    }
+
+    private static let localAvatarPrefix = "local-avatar/"
+
+    private static func writeLocalAvatar(_ jpeg: Data) throws -> String {
+        let filename = "\(UUID().uuidString).jpg"
+        let directory = localAvatarDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try jpeg.write(to: directory.appendingPathComponent(filename), options: [.atomic])
+        return localAvatarPrefix + filename
+    }
+
+    private static func localAvatarDirectory() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CheekyPintAvatars", isDirectory: true)
     }
 }

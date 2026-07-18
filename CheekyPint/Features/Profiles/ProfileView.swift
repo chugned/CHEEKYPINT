@@ -19,6 +19,13 @@ struct ProfileView: View {
                                 if let username = profile.username { Text("@\(username)").font(Theme.Typography.caption).foregroundStyle(Theme.Palette.textSecondary) }
                                 if let city = profile.city { Text(city).font(Theme.Typography.caption).foregroundStyle(Theme.Palette.textSecondary) }
                             }
+                            Spacer()
+                            NavigationLink { EditProfileView() } label: {
+                                Image(systemName: "pencil.circle.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(Theme.Palette.accent)
+                            }
+                            .accessibilityLabel("Edit nickname and profile picture")
                         }
                         .padding(.vertical, Theme.Spacing.xxs)
                     }

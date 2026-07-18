@@ -17,6 +17,8 @@ This build is tuned for a private friend group rather than public auth.
 - Tapping a live-map pub marker or pub row opens a detail sheet with the pub name, address,
   distance, Apple Look Around imagery when Apple has it, a fallback image state, and quick actions
   for Apple Maps, website, and phone.
+- The Profile tab now has a direct edit button for changing your friend-circle nickname and
+  profile picture. In surname-only mode the photo is stored locally on the phone.
 
 ## Beer Display
 

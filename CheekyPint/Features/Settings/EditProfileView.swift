@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 import CheekyPintCore
 
 /// Edit profile + change username / broad location (master prompt §18). Username is validated
@@ -12,6 +13,8 @@ struct EditProfileView: View {
     @State private var username = ""
     @State private var bio = ""
     @State private var city = ""
+    @State private var pickedItem: PhotosPickerItem?
+    @State private var avatarData: Data?
     @State private var usernameError: String?
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -21,8 +24,24 @@ struct EditProfileView: View {
 
     var body: some View {
         Form {
-            Section("Name") {
-                TextField("Display name", text: $displayName)
+            Section("Profile picture") {
+                HStack {
+                    Spacer()
+                    currentAvatar
+                    Spacer()
+                }
+                PhotosPicker(selection: $pickedItem, matching: .images) {
+                    Label("Choose photo", systemImage: "photo.on.rectangle")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .onChange(of: pickedItem) { _, item in Task { await loadAvatar(item) } }
+            }
+            Section("Nickname") {
+                TextField("Nickname", text: $displayName)
+                    .textInputAutocapitalization(.words)
+                Text("This is the name your mates see around CheekyPint.")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Palette.textSecondary)
             }
             Section("Username") {
                 TextField("username", text: $username)
@@ -48,10 +67,27 @@ struct EditProfileView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { Task { await save() } }.disabled(isSaving || usernameError != nil)
+                Button("Save") { Task { await save() } }
+                    .disabled(isSaving || usernameError != nil || sanitizer.sanitizeDisplayName(displayName).isEmpty)
             }
         }
         .onAppear(perform: populate)
+    }
+
+    @ViewBuilder
+    private var currentAvatar: some View {
+        if let avatarData {
+            AvatarPreview(data: avatarData, fallbackInitials: displayName, size: 104)
+                .overlay(Circle().stroke(Theme.Palette.accent.opacity(0.8), lineWidth: 2))
+        } else if let profile = session.currentProfile {
+            RemoteAvatar(
+                url: container.avatarURL(for: profile.avatarPath),
+                name: displayName.isEmpty ? profile.displayName : displayName,
+                size: 104
+            )
+        } else {
+            AvatarPreview(data: nil, fallbackInitials: displayName, size: 104)
+        }
     }
 
     private func populate() {
@@ -81,6 +117,19 @@ struct EditProfileView: View {
         }
     }
 
+    private func loadAvatar(_ item: PhotosPickerItem?) async {
+        guard let item else { return }
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let image = UIImage(data: data),
+              let jpeg = ImageResizer.jpeg(from: image)
+        else {
+            errorMessage = "Couldn't read that photo. Try another image."
+            return
+        }
+        avatarData = jpeg
+        errorMessage = nil
+    }
+
     private func save() async {
         isSaving = true; errorMessage = nil
         defer { isSaving = false }
@@ -93,6 +142,9 @@ struct EditProfileView: View {
             update.username = normalised
         }
         do {
+            if let avatarData {
+                try await container.profiles.uploadAvatar(avatarData)
+            }
             try await container.profiles.updateProfile(update)
             await session.refreshProfile()
             dismiss()
