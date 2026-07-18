@@ -24,8 +24,6 @@ struct LogPintSheet: View {
     @State private var selectedPub: Pub?
     @State private var showPubPicker = false
     @State private var isSaving = false
-    @State private var isPouring = false
-    @State private var pourProgress: CGFloat = 0.18
     @State private var errorMessage: String?
 
     // Generated once for the lifetime of this sheet — the idempotency guarantee.
@@ -74,7 +72,6 @@ struct LogPintSheet: View {
                     ForEach(filteredBeers) { beer in
                         BeerCard(beer: beer, isSelected: beer == selectedBeer) {
                             selectedBeer = beer
-                            pourProgress = 0.18
                         }
                     }
                 }
@@ -156,28 +153,13 @@ struct LogPintSheet: View {
         Section {
             PourToLogButton(
                 beer: selectedBeer,
-                progress: pourProgress,
-                isWorking: isSaving || isPouring
+                isWorking: isSaving
             ) {
-                Task { await pourAndSave() }
+                Task { await save() }
             }
         } footer: {
-            Text("The record is created when the glass fills up. Science, probably.")
+            Text("Log it and stand back. The succulence arrives immediately.")
         }
-    }
-
-    private func pourAndSave() async {
-        guard !isSaving, !isPouring else { return }
-        isPouring = true
-        errorMessage = nil
-        pourProgress = 0.18
-        withAnimation(.easeInOut(duration: 0.85)) { pourProgress = 1 }
-        try? await Task.sleep(for: .milliseconds(900))
-        await save()
-        if errorMessage != nil {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { pourProgress = 0.18 }
-        }
-        isPouring = false
     }
 
     private func save() async {
@@ -697,18 +679,17 @@ private struct ArtworkPalette {
 
 private struct PourToLogButton: View {
     let beer: BeerChoice
-    let progress: CGFloat
     let isWorking: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: Theme.Spacing.md) {
-                PintGlass(fill: progress, edge: Theme.Palette.textPrimary)
+                PintGlass(fill: 0.86, edge: Theme.Palette.textPrimary)
                     .frame(width: 58, height: 84)
                     .shadow(color: Theme.Palette.beer.opacity(0.25), radius: 10, y: 4)
                 VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                    Text(isWorking ? "Filling..." : "Fill to record")
+                    Text(isWorking ? "Logging..." : "Log beer")
                         .font(Theme.Typography.headline.weight(.bold))
                         .foregroundStyle(Theme.Palette.textPrimary)
                     Text(beer.name)
@@ -717,7 +698,7 @@ private struct PourToLogButton: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                Image(systemName: isWorking ? "hourglass" : "hand.tap.fill")
+                Image(systemName: isWorking ? "hourglass" : "plus.circle.fill")
                     .font(.title3)
                     .foregroundStyle(Theme.Palette.accent)
             }
@@ -725,6 +706,6 @@ private struct PourToLogButton: View {
         }
         .buttonStyle(.plain)
         .disabled(isWorking)
-        .accessibilityLabel("Fill glass to record \(beer.name)")
+        .accessibilityLabel("Log \(beer.name)")
     }
 }
