@@ -9,6 +9,8 @@ struct HomeView: View {
     @State private var model: HomeViewModel?
     @State private var showLogSheet = false
     @State private var showQR = false
+    @State private var showPourCelebration = false
+    @State private var pendingPourCelebration = false
 
     var body: some View {
         NavigationStack {
@@ -22,13 +24,15 @@ struct HomeView: View {
             .pubBackground()
             .navigationBarTitleDisplayMode(.inline)
         }
-        .fullScreenCover(isPresented: celebrationBinding) {
-            if let model, model.showCelebration {
-                PintPourView { model.showCelebration = false }
-                    .presentationBackground(.clear)
+        .fullScreenCover(isPresented: $showPourCelebration) {
+            PintPourView { showPourCelebration = false }
+                .presentationBackground(.clear)
+        }
+        .onChange(of: showLogSheet) { _, isPresented in
+            if !isPresented && pendingPourCelebration {
+                presentPourCelebrationAfterSheetDismissal()
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: model?.showCelebration)
         .task {
             if model == nil, let profile = session.currentProfile {
                 let vm = HomeViewModel(container: container, profile: profile)
@@ -38,15 +42,20 @@ struct HomeView: View {
         }
     }
 
-    private var celebrationBinding: Binding<Bool> {
-        Binding(
-            get: { model?.showCelebration == true },
-            set: { isPresented in
-                if !isPresented {
-                    model?.showCelebration = false
-                }
-            }
-        )
+    private func queuePourCelebration() {
+        pendingPourCelebration = true
+        if !showLogSheet {
+            presentPourCelebrationAfterSheetDismissal()
+        }
+    }
+
+    private func presentPourCelebrationAfterSheetDismissal() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(220))
+            guard pendingPourCelebration, !showLogSheet else { return }
+            pendingPourCelebration = false
+            showPourCelebration = true
+        }
     }
 
     @ViewBuilder
@@ -78,6 +87,8 @@ struct HomeView: View {
         .sheet(isPresented: $showLogSheet) {
             LogPintSheet(profile: model.profile, activeSession: model.activeSession) { entry in
                 await model.didLog(entry)
+                showLogSheet = false
+                queuePourCelebration()
             }
         }
         .sheet(isPresented: $showQR) { MyQRView() }

@@ -158,7 +158,7 @@ struct LogPintSheet: View {
                 Task { await save() }
             }
         } footer: {
-            Text("Log it and stand back. The succelance arrives immediately.")
+            Text("Log it and stand back. The succulence arrives immediately.")
         }
     }
 

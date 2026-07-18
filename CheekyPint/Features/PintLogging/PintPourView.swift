@@ -23,7 +23,7 @@ struct PintPourView: View {
                 foamSplashes(in: geo.size)
                 bubbleField(in: geo.size)
 
-                Text("+1 succelance")
+                Text("+1 succulence")
                     .font(.system(size: 44, weight: .black, design: .rounded))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white)
@@ -36,7 +36,7 @@ struct PintPourView: View {
             .ignoresSafeArea()
         }
         .accessibilityElement()
-        .accessibilityLabel("Plus one succelance")
+        .accessibilityLabel("Plus one succulence")
         .accessibilityAddTraits(.isModal)
         .onAppear(perform: play)
     }

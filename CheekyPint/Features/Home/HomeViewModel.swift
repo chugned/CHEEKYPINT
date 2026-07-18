@@ -22,9 +22,6 @@ final class HomeViewModel {
     /// The confirmation copy for the last log: "Pint logged. Cheers." or a welfare nudge (§3.7).
     private(set) var confirmationMessage = WelfareMonitor.cheersMessage
     private(set) var lastWasWelfare = false
-    /// Drives the succulent pint-pour celebration — only for a normal (non-welfare) log.
-    var showCelebration = false
-
     init(container: AppContainer, profile: Profile) {
         self.container = container
         self.profile = profile
@@ -118,8 +115,6 @@ final class HomeViewModel {
         if !lastWasWelfare, let beerName = BeerCatalog.beerName(in: entry.privateNote) {
             confirmationMessage = "\(beerName) logged. The committee has been notified."
         }
-        // Celebrate a normal pint; stay calm (no animation) when the welfare nudge applies.
-        showCelebration = !lastWasWelfare
         if lastWasWelfare { Haptics.warning() }
         await load()
         await loadStandings()
