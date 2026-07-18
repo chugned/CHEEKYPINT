@@ -1,0 +1,11 @@
+#include "Shared.xcconfig"
+
+// The `$()` splits the `//` so xcconfig does not treat the rest of the URL as a comment.
+APP_ENV = development
+APP_DISPLAY_NAME = CheekyPint Dev
+PRODUCT_BUNDLE_IDENTIFIER = app.cheekypint.CheekyPint.dev
+
+SUPABASE_URL = http:/$()/127.0.0.1:54321
+// Local Supabase's fixed demo anon key is safe to commit; a real project's anon key is also
+// non-secret (RLS protects data). Replace when pointing at a hosted project.
+SUPABASE_ANON_KEY = REPLACE_WITH_LOCAL_ANON_KEY

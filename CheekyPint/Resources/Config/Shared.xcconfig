@@ -1,0 +1,22 @@
+// Shared build settings across all configurations.
+// Environment-specific values live in Development/Staging/Production.xcconfig.
+
+PRODUCT_BUNDLE_IDENTIFIER = app.cheekypint.CheekyPint
+PRODUCT_NAME = CheekyPint
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+IPHONEOS_DEPLOYMENT_TARGET = 17.0
+SWIFT_VERSION = 6.0
+TARGETED_DEVICE_FAMILY = 1
+SUPPORTED_PLATFORMS = iphoneos iphonesimulator
+
+// Sign in with Apple + universal links + custom scheme are declared in entitlements/Info.plist.
+CODE_SIGN_STYLE = Automatic
+SWIFT_EMIT_LOC_STRINGS = YES
+ENABLE_USER_SCRIPT_SANDBOXING = YES
+DEVELOPMENT_ASSET_PATHS = "CheekyPint/PreviewContent"
+
+// URL scheme used for QR deep links + auth callback.
+CHEEKYPINT_URL_SCHEME = cheekypint
+CHEEKYPINT_UNIVERSAL_HOST = cheekypint.app

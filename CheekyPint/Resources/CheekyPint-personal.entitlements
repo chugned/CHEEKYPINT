@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Entitlements for installing with a FREE personal Apple team. Personal teams cannot use
+	     Sign in with Apple or Associated Domains, so those are omitted here. Use the full
+	     CheekyPint.entitlements with a paid team for production. -->
+</dict>
+</plist>

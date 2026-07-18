@@ -1,0 +1,52 @@
+# CheekyPint local Supabase configuration.
+# Docs: https://supabase.com/docs/guides/cli/config
+project_id = "cheekypint"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 16
+
+[db.pooler]
+enabled = false
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "cheekypint://auth-callback"
+additional_redirect_urls = [
+  "cheekypint://auth-callback",
+  "https://cheekypint.app/auth-callback"
+]
+jwt_expiry = 3600
+enable_signup = true
+minimum_password_length = 8
+
+# Email magic link is the secondary auth method (Sign in with Apple is configured in the
+# hosted dashboard because it needs Apple keys — see docs/APP_STORE_SUBMISSION.md).
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+secure_password_change = true
+
+[auth.external.apple]
+enabled = true
+client_id = "env(APPLE_CLIENT_ID)"
+secret = "env(APPLE_SECRET)"
+
+[storage]
+enabled = true
+file_size_limit = "5MiB"
+
+[edge_runtime]
+enabled = true

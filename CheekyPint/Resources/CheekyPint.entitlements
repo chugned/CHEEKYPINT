@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Sign in with Apple (primary auth method). -->
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+	<!-- Universal links so friend/session codes open the app, with a web fallback for people
+	     who don't have it installed yet. Must match the domain in Info.plist + backend. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:cheekypint.app</string>
+	</array>
+</dict>
+</plist>

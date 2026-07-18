@@ -1,0 +1,91 @@
+# XcodeGen spec for the CheekyPint app. Regenerate the .xcodeproj with `xcodegen generate`.
+# Both this file and the generated CheekyPint.xcodeproj are committed, so the project opens in
+# Xcode with no extra tooling; regenerate only if you change targets/structure.
+name: CheekyPint
+options:
+  bundleIdPrefix: app.cheekypint
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  minimumXcodeGenVersion: "2.38.0"
+
+configs:
+  Debug: debug
+  Staging: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+
+packages:
+  CheekyPintCore:
+    path: CheekyPintCore
+
+targets:
+  CheekyPint:
+    type: application
+    platform: iOS
+    # Per-configuration Supabase endpoints + bundle ids come from these xcconfig files.
+    configFiles:
+      Debug: CheekyPint/Resources/Config/Development.xcconfig
+      Staging: CheekyPint/Resources/Config/Staging.xcconfig
+      Release: CheekyPint/Resources/Config/Production.xcconfig
+    sources:
+      - path: CheekyPint
+        excludes:
+          - "Resources/Info.plist"
+          - "Resources/CheekyPint.entitlements"
+          - "Resources/Config"
+    settings:
+      base:
+        INFOPLIST_FILE: CheekyPint/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: CheekyPint/Resources/CheekyPint.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: YES
+        DEVELOPMENT_ASSET_PATHS: '"CheekyPint/PreviewContent"'
+    dependencies:
+      - package: CheekyPintCore
+        product: CheekyPintCore
+
+  CheekyPintTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [CheekyPintTests]
+    dependencies:
+      - target: CheekyPint
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+
+  CheekyPintUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [CheekyPintUITests]
+    dependencies:
+      - target: CheekyPint
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  CheekyPint:
+    build:
+      targets:
+        CheekyPint: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - CheekyPintTests
+        - CheekyPintUITests
+    archive:
+      config: Release

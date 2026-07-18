@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleDisplayName</key>
+	<string>$(APP_DISPLAY_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>BackgroundPrimary</string>
+	</dict>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+
+	<!-- Export compliance: the app uses only standard HTTPS/OS crypto. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<!-- Permission strings. Each is shown only after an in-app explanation (§17). -->
+	<key>NSCameraUsageDescription</key>
+	<string>CheekyPint uses the camera to scan friend and pub-session QR codes.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>CheekyPint uses your location while the app is open to help you find nearby pubs. Your location is not shared automatically.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>CheekyPint lets you choose a profile picture from your photo library.</string>
+
+	<!-- Custom-scheme deep links: cheekypint://friend/<token>, cheekypint://session/<token>. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.cheekypint.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>$(CHEEKYPINT_URL_SCHEME)</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- Environment configuration injected from the active xcconfig. -->
+	<key>CheekyPintEnvironment</key>
+	<string>$(APP_ENV)</string>
+	<key>SupabaseURL</key>
+	<string>$(SUPABASE_URL)</string>
+	<key>SupabaseAnonKey</key>
+	<string>$(SUPABASE_ANON_KEY)</string>
+	<key>CheekyPintUniversalHost</key>
+	<string>$(CHEEKYPINT_UNIVERSAL_HOST)</string>
+</dict>
+</plist>
