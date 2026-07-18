@@ -718,7 +718,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = CheekyPint/Resources/CheekyPint.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "CheekyPint/Resources/CheekyPint-personal.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				DEVELOPMENT_ASSET_PATHS = "\"CheekyPint/PreviewContent\"";
 				ENABLE_PREVIEWS = YES;
@@ -999,7 +999,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = CheekyPint/Resources/CheekyPint.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "CheekyPint/Resources/CheekyPint-personal.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				DEVELOPMENT_ASSET_PATHS = "\"CheekyPint/PreviewContent\"";
 				ENABLE_PREVIEWS = YES;
@@ -1035,7 +1035,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = CheekyPint/Resources/CheekyPint.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "CheekyPint/Resources/CheekyPint-personal.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				DEVELOPMENT_ASSET_PATHS = "\"CheekyPint/PreviewContent\"";
 				ENABLE_PREVIEWS = YES;

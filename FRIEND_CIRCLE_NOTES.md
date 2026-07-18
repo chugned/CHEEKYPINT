@@ -32,11 +32,14 @@ Simulator build check:
 env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -quiet -scheme CheekyPint -destination 'generic/platform=iOS Simulator' build
 ```
 
-Device install flow:
+Device install flow used for the iPhone 14 Pro named `Gospodar Tvoje Majke`:
 
 ```sh
-env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme CheekyPint -destination 'id=<device-id>' build
-env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device install app --device <device-id> <path-to-CheekyPint.app>
+env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme CheekyPint -destination 'id=00008120-001C555C22EB401E' -configuration Debug DEVELOPMENT_TEAM=C5342YYG52 CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates build
+env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device install app --device F768B67E-E248-5A41-90E5-9A25AB582D5D ~/Library/Developer/Xcode/DerivedData/CheekyPint-atrlghyhsaqbxkeqmxtuqgyrmchs/Build/Products/Debug-iphoneos/CheekyPint.app
+env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device process launch --device F768B67E-E248-5A41-90E5-9A25AB582D5D app.cheekypint.CheekyPint.dev
 ```
 
-The device build still depends on local Apple signing/provisioning being valid in Xcode.
+The project defaults to `CheekyPint-personal.entitlements` so it can install with a free
+personal Apple team. `CheekyPint.entitlements` is still present for a future paid-team build
+that wants Associated Domains or Sign in with Apple back.
