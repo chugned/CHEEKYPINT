@@ -63,12 +63,21 @@ actor DemoWorld {
             entry(10, user: Self.aliceID, beer: "Hoegaarden", serving: .ml330, alcoholFree: true),
             entry(60 * 26, user: Self.aliceID, beer: "Guinness", serving: .halfPint, pub: Self.kingsPubID),
             entry(60 * 24 * 9, user: Self.aliceID, beer: "Pilsner Urquell", pub: Self.officePubID),
+            entry(60 * 24 * 12, user: Self.aliceID, beer: "Ottakringer Helles", pub: Self.kingsPubID),
+            entry(60 * 24 * 15, user: Self.aliceID, beer: "Puntigamer", pub: Self.officePubID),
+            entry(60 * 24 * 22, user: Self.aliceID, beer: "Stiegl", pub: Self.krugPubID),
             entry(8, user: Self.barnabyID, beer: "Guinness", pub: Self.kingsPubID, session: Self.sessionID),
             entry(65, user: Self.barnabyID, beer: "Stella Artois", pub: Self.kingsPubID, session: Self.sessionID),
             entry(60 * 7, user: Self.barnabyID, beer: "Peroni Nastro Azzurro", pub: Self.officePubID),
+            entry(60 * 24 * 4, user: Self.barnabyID, beer: "Guinness", pub: Self.kingsPubID),
+            entry(60 * 24 * 6, user: Self.barnabyID, beer: "Carlsberg", pub: Self.krugPubID),
+            entry(60 * 24 * 14, user: Self.barnabyID, beer: "Stella Artois", pub: Self.kingsPubID),
             entry(18, user: Self.ceriID, beer: "Pilsner Urquell", pub: Self.krugPubID),
             entry(80, user: Self.ceriID, beer: "Ottakringer Helles", pub: Self.krugPubID),
             entry(60 * 30, user: Self.ceriID, beer: "Guinness", pub: Self.kingsPubID),
+            entry(60 * 24 * 3, user: Self.ceriID, beer: "Hoegaarden", pub: Self.krugPubID),
+            entry(60 * 24 * 8, user: Self.ceriID, beer: "Pilsner Urquell", pub: Self.officePubID),
+            entry(60 * 24 * 20, user: Self.ceriID, beer: "Ottakringer Helles", pub: Self.krugPubID),
         ]
     }
 
@@ -265,6 +274,7 @@ actor DemoWorld {
                 .sorted { $0.occurredAt > $1.occurredAt }
             let currentEntry = logs.first { $0.pubId != nil && Date().timeIntervalSince($0.occurredAt) <= 4 * 60 * 60 }
             let currentPub = currentEntry?.pubId.flatMap { pubs[$0] }
+            let topPubs = Self.topPubs(from: logs, pubs: pubs)
             return FriendBeerActivity(
                 userID: userID,
                 displayName: name,
@@ -275,16 +285,41 @@ actor DemoWorld {
                 currentPubLatitude: currentPub?.latitude,
                 currentPubLongitude: currentPub?.longitude,
                 currentBeerName: currentEntry.flatMap { Self.beerName(in: $0.privateNote) },
-                recentLogs: logs.prefix(20).map { entry in
+                recentLogs: logs.map { entry in
                     FriendBeerLog(
                         id: entry.id,
                         beerName: Self.beerName(in: entry.privateNote) ?? "Mystery pint",
                         pubName: entry.pubId.flatMap { pubs[$0]?.name },
                         occurredAt: entry.occurredAt
                     )
-                }
+                },
+                topPubs: topPubs
             )
         }
+    }
+
+    private static func topPubs(from logs: [PintEntry], pubs: [UUID: Pub]) -> [FriendTopPub] {
+        let grouped = Dictionary(grouping: logs.compactMap { entry -> (UUID, Date)? in
+            guard let pubId = entry.pubId else { return nil }
+            return (pubId, entry.occurredAt)
+        }, by: \.0)
+
+        return grouped.compactMap { pubId, visits -> FriendTopPub? in
+            guard let pub = pubs[pubId], let lastVisit = visits.map(\.1).max() else { return nil }
+            return FriendTopPub(
+                id: pubId,
+                name: pub.name,
+                address: pub.formattedAddress,
+                visitCount: visits.count,
+                lastVisit: lastVisit
+            )
+        }
+        .sorted {
+            if $0.visitCount != $1.visitCount { return $0.visitCount > $1.visitCount }
+            return $0.lastVisit > $1.lastVisit
+        }
+        .prefix(3)
+        .map { $0 }
     }
 
     private static func beerName(in note: String?) -> String? {

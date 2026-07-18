@@ -32,6 +32,12 @@ struct LeaderboardRowView: View {
                         .font(Theme.Typography.caption.weight(.semibold))
                         .foregroundStyle(Theme.Palette.accent)
                         .lineLimit(2)
+                    if let topPub = activity.topPubs.first {
+                        Label("Top pub: \(topPub.name) (\(topPub.visitCount))", systemImage: "trophy.fill")
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.Palette.textPrimary.opacity(0.86))
+                            .lineLimit(1)
+                    }
                     ForEach(activity.recentLogs.prefix(3)) { log in
                         Text(logLine(log))
                             .font(Theme.Typography.caption)

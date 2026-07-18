@@ -52,6 +52,14 @@ struct FriendBeerLog: Identifiable, Sendable, Hashable {
     let occurredAt: Date
 }
 
+struct FriendTopPub: Identifiable, Sendable, Hashable {
+    let id: UUID
+    let name: String
+    let address: String?
+    let visitCount: Int
+    let lastVisit: Date
+}
+
 struct FriendBeerActivity: Identifiable, Sendable, Hashable {
     let userID: UUID
     let displayName: String
@@ -63,6 +71,7 @@ struct FriendBeerActivity: Identifiable, Sendable, Hashable {
     let currentPubLongitude: Double?
     let currentBeerName: String?
     let recentLogs: [FriendBeerLog]
+    let topPubs: [FriendTopPub]
 
     var id: UUID { userID }
 

@@ -130,7 +130,19 @@ private struct FriendBeerActivityDetailView: View {
                     }
                 }
 
-                Section("Beers") {
+                Section("Top pubs") {
+                    if activity.topPubs.isEmpty {
+                        Text("No pub recommendations yet.")
+                            .font(Theme.Typography.callout)
+                            .foregroundStyle(Theme.Palette.textSecondary)
+                    } else {
+                        ForEach(Array(activity.topPubs.enumerated()), id: \.element.id) { index, pub in
+                            TopPubMedalRow(pub: pub, rank: index + 1)
+                        }
+                    }
+                }
+
+                Section("Drink history") {
                     ForEach(activity.recentLogs) { log in
                         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                             Text(log.beerName)
@@ -159,5 +171,68 @@ private struct FriendBeerActivityDetailView: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+private struct TopPubMedalRow: View {
+    let pub: FriendTopPub
+    let rank: Int
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+            medal
+                .frame(width: 38, height: 38)
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                Text(pub.name)
+                    .font(Theme.Typography.headline)
+                    .foregroundStyle(Theme.Palette.textPrimary)
+                Text("\(pub.visitCount) visit\(pub.visitCount == 1 ? "" : "s")")
+                    .font(Theme.Typography.callout)
+                    .foregroundStyle(Theme.Palette.accent)
+                if let address = pub.address {
+                    Text(address)
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Palette.textSecondary)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(.vertical, Theme.Spacing.xxs)
+    }
+
+    private var medal: some View {
+        ZStack {
+            Circle()
+                .fill(medalColor)
+                .shadow(color: medalColor.opacity(0.32), radius: 6, y: 2)
+            Text(medalText)
+                .font(.system(size: 17, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+        }
+        .accessibilityLabel(medalAccessibility)
+    }
+
+    private var medalText: String {
+        switch rank {
+        case 1: return "G"
+        case 2: return "S"
+        default: return "B"
+        }
+    }
+
+    private var medalAccessibility: String {
+        switch rank {
+        case 1: return "Gold"
+        case 2: return "Silver"
+        default: return "Bronze"
+        }
+    }
+
+    private var medalColor: Color {
+        switch rank {
+        case 1: return Color(red: 0.93, green: 0.63, blue: 0.13)
+        case 2: return Color(red: 0.58, green: 0.62, blue: 0.66)
+        default: return Color(red: 0.67, green: 0.39, blue: 0.18)
+        }
     }
 }
