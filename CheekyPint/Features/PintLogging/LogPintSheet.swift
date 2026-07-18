@@ -78,7 +78,7 @@ struct LogPintSheet: View {
                 .padding(.vertical, Theme.Spacing.xs)
             }
             .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-            Text("\(BeerCatalog.beers.count) beers loaded. Every one has a picture; verified Commons photos load where available.")
+            Text("\(BeerCatalog.beers.count) beers loaded. Every one uses an online bottle or glass photo; generated art only appears if the network image fails.")
                 .font(Theme.Typography.caption)
                 .foregroundStyle(Theme.Palette.textSecondary)
         }
@@ -383,7 +383,6 @@ enum BeerCatalog {
         roast: String,
         file: String
     ) -> BeerChoice {
-        let encoded = file.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file
         return BeerChoice(
             id: id,
             name: name,
@@ -392,8 +391,8 @@ enum BeerCatalog {
             nickname: nickname,
             glassNote: glassNote,
             roast: roast,
-            imageURL: URL(string: "https://commons.wikimedia.org/wiki/Special:FilePath/\(encoded)?width=700")!,
-            sourceURL: URL(string: "https://commons.wikimedia.org/wiki/File:\(encoded)")!
+            imageURL: commonsImageURL(file),
+            sourceURL: commonsSourceURL(file)
         )
     }
 
@@ -406,7 +405,8 @@ enum BeerCatalog {
         _ glassNote: String,
         _ roast: String
     ) -> BeerChoice {
-        BeerChoice(
+        let imageFile = onlineImageFile(for: id, style: style)
+        return BeerChoice(
             id: id,
             name: name,
             country: country,
@@ -414,9 +414,63 @@ enum BeerCatalog {
             nickname: nickname,
             glassNote: glassNote,
             roast: roast,
-            imageURL: nil,
-            sourceURL: nil
+            imageURL: commonsImageURL(imageFile),
+            sourceURL: commonsSourceURL(imageFile)
         )
+    }
+
+    private static func commonsImageURL(_ file: String) -> URL {
+        let encoded = file.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file
+        return URL(string: "https://commons.wikimedia.org/wiki/Special:FilePath/\(encoded)?width=700")!
+    }
+
+    private static func commonsSourceURL(_ file: String) -> URL {
+        let encoded = file.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file
+        return URL(string: "https://commons.wikimedia.org/wiki/File:\(encoded)")!
+    }
+
+    private static func onlineImageFile(for id: String, style: String) -> String {
+        switch id {
+        case "augustiner-helles":
+            return "Augustinerbräu München Lagerbier Hell.jpg"
+        case "weihenstephaner":
+            return "Weihenstephaner Hefeweissbier Alkoholfrei.jpg"
+        case "erdinger":
+            return "Erdinger Weissbier Dunkel.jpg"
+        case "chimay-blue":
+            return "Chimay bleu.jpg"
+        case "tripel-karmeliet":
+            return "Tripel Karmeliet glass.JPG"
+        case "delirium-tremens":
+            return "Delirium tremens glas.jpg"
+        case "windhoek":
+            return "Windhoek-Lager-bottle.jpg"
+        case "quilmes":
+            return "Quilmes beer bottles.jpg"
+        default:
+            return fallbackImageFile(for: style)
+        }
+    }
+
+    private static func fallbackImageFile(for style: String) -> String {
+        let normalized = style.lowercased()
+        if normalized.contains("stout") || normalized.contains("brown") || normalized.contains("dark") {
+            return "GuinnessPint.jpg"
+        }
+        if normalized.contains("wheat") || normalized.contains("wit") || normalized.contains("radler") {
+            return "HoegaardenGlass.jpg"
+        }
+        if normalized.contains("ipa")
+            || normalized.contains("ale")
+            || normalized.contains("bitter")
+            || normalized.contains("amber")
+            || normalized.contains("cream") {
+            return "Tripel Karmeliet glass.JPG"
+        }
+        if normalized.contains("hell") {
+            return "Helles_im_Glas-Helles_(pale_beer).jpg"
+        }
+        return "Pilsener_Urquell_hohes_Glas.jpg"
     }
 }
 
