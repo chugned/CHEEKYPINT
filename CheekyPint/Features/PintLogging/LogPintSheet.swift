@@ -158,7 +158,7 @@ struct LogPintSheet: View {
                 Task { await save() }
             }
         } footer: {
-            Text("Log it and stand back. The succulence arrives immediately.")
+            Text("Log it and stand back. The succelance arrives immediately.")
         }
     }
 
@@ -180,8 +180,9 @@ struct LogPintSheet: View {
             )
             container.analytics.track(.pintSaved)
             Haptics.success()
-            await onLogged(entry)
             dismiss()
+            try? await Task.sleep(for: .milliseconds(280))
+            await onLogged(entry)
         } catch let error as SupabaseError {
             errorMessage = error.friendlyMessage
         } catch {

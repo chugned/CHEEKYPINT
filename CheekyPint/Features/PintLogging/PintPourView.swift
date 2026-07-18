@@ -23,7 +23,7 @@ struct PintPourView: View {
                 foamSplashes(in: geo.size)
                 bubbleField(in: geo.size)
 
-                Text("+1 succulence")
+                Text("+1 succelance")
                     .font(.system(size: 44, weight: .black, design: .rounded))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white)
@@ -36,7 +36,7 @@ struct PintPourView: View {
             .ignoresSafeArea()
         }
         .accessibilityElement()
-        .accessibilityLabel("Plus one succulence")
+        .accessibilityLabel("Plus one succelance")
         .accessibilityAddTraits(.isModal)
         .onAppear(perform: play)
     }
@@ -44,21 +44,22 @@ struct PintPourView: View {
     private func overflow(in size: CGSize) -> some View {
         ZStack {
             beerPanel
-                .frame(width: size.width, height: size.height * 0.56)
-                .offset(y: flood ? -size.height * 0.22 : -size.height)
+                .frame(width: size.width, height: flood ? size.height : 0)
+                .frame(maxHeight: .infinity, alignment: .top)
 
             beerPanel
-                .frame(width: size.width, height: size.height * 0.56)
-                .offset(y: flood ? size.height * 0.22 : size.height)
+                .frame(width: size.width, height: flood ? size.height : 0)
+                .frame(maxHeight: .infinity, alignment: .bottom)
 
             beerPanel
-                .frame(width: size.width * 0.58, height: size.height)
-                .offset(x: flood ? -size.width * 0.22 : -size.width)
+                .frame(width: flood ? size.width : 0, height: size.height)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             beerPanel
-                .frame(width: size.width * 0.58, height: size.height)
-                .offset(x: flood ? size.width * 0.22 : size.width)
+                .frame(width: flood ? size.width : 0, height: size.height)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
+        .frame(width: size.width, height: size.height)
     }
 
     private var beerPanel: some View {
@@ -133,7 +134,7 @@ struct PintPourView: View {
             return
         }
 
-        withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) { flood = true }
+        withAnimation(.easeOut(duration: 0.55)) { flood = true }
         withAnimation(.spring(response: 0.48, dampingFraction: 0.58).delay(0.12)) { foam = true }
         withAnimation(.easeIn(duration: 0.05).delay(0.18)) { bubbles = true }
         withAnimation(.spring(response: 0.38, dampingFraction: 0.52).delay(0.22)) { textIn = true }
