@@ -26,6 +26,9 @@ struct PubsView: View {
                     }
                 }
                 Section("Find a pub") {
+                    NavigationLink { PubLiveMapView() } label: {
+                        Label("Live pub map", systemImage: "map.fill")
+                    }
                     NavigationLink { PubBrowseView() } label: {
                         Label("Search pubs", systemImage: "magnifyingglass")
                     }
@@ -38,6 +41,195 @@ struct PubsView: View {
         .task {
             if !loaded { activeSession = try? await container.sessions.fetchActiveSession(); loaded = true }
         }
+    }
+}
+
+/// A current-location map of nearby places where a pint is a realistic option.
+struct PubLiveMapView: View {
+    @Environment(\.container) private var container
+
+    @State private var location = LocationService()
+    @State private var userCoordinate: CLLocationCoordinate2D?
+    @State private var pubs: [PubSearchResult] = []
+    @State private var selectedPub: PubSearchResult?
+    @State private var position: MapCameraPosition = .automatic
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            map
+                .frame(height: 360)
+            nearbyList
+        }
+        .pubBackground()
+        .navigationTitle("Live pub map")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { Task { await refresh() } } label: {
+                    Image(systemName: "location.fill")
+                }
+                .disabled(isLoading)
+                .accessibilityLabel("Refresh nearby pubs")
+            }
+        }
+        .task {
+            if pubs.isEmpty && !isLoading {
+                await refresh()
+            }
+        }
+    }
+
+    private var map: some View {
+        ZStack(alignment: .bottomLeading) {
+            Map(position: $position, selection: $selectedPub) {
+                UserAnnotation()
+                ForEach(pubs) { pub in
+                    Marker(pub.name, systemImage: "mug.fill", coordinate: pub.coordinate)
+                        .tint(Theme.Palette.accent)
+                        .tag(pub)
+                }
+            }
+            .mapControls {
+                MapUserLocationButton()
+                MapCompass()
+                MapScaleView()
+            }
+
+            if isLoading {
+                ProgressView("Finding pints nearby")
+                    .font(Theme.Typography.caption)
+                    .tint(Theme.Palette.accent)
+                    .padding(Theme.Spacing.sm)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+                    .padding(Theme.Spacing.md)
+            } else if let errorMessage {
+                Text(errorMessage)
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Palette.textPrimary)
+                    .padding(Theme.Spacing.sm)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+                    .padding(Theme.Spacing.md)
+            }
+        }
+    }
+
+    private var nearbyList: some View {
+        List {
+            if pubs.isEmpty && !isLoading {
+                StatusView(
+                    systemImage: location.status == .denied ? "location.slash.fill" : "map.fill",
+                    title: location.status == .denied ? "Location is off" : "No nearby pubs yet",
+                    message: location.status == .denied
+                        ? "Enable location access in Settings, or use manual pub search."
+                        : "Tap the location button to scan nearby pubs."
+                )
+            }
+
+            ForEach(sortedPubs) { pub in
+                Button {
+                    selectedPub = pub
+                    focus(on: pub)
+                } label: {
+                    PubMapRow(
+                        pub: pub,
+                        distanceText: distanceText(to: pub),
+                        isSelected: selectedPub == pub
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+
+    private var sortedPubs: [PubSearchResult] {
+        guard let userCoordinate else { return pubs }
+        return pubs.sorted {
+            distance(from: userCoordinate, to: $0.coordinate) < distance(from: userCoordinate, to: $1.coordinate)
+        }
+    }
+
+    private func refresh() async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        do {
+            let current = try await location.requestOneShotLocation()
+            userCoordinate = current.coordinate
+            position = .region(MKCoordinateRegion(
+                center: current.coordinate,
+                latitudinalMeters: 4200,
+                longitudinalMeters: 4200
+            ))
+            let found = try await container.pubs.search(matching: "pub bar brewery beer", near: current.coordinate)
+            pubs = Array(found.prefix(30))
+            selectedPub = pubs.first
+        } catch {
+            errorMessage = "Couldn't use your location. Unlock location access or try manual search."
+        }
+    }
+
+    private func focus(on pub: PubSearchResult) {
+        position = .region(MKCoordinateRegion(
+            center: pub.coordinate,
+            latitudinalMeters: 900,
+            longitudinalMeters: 900
+        ))
+    }
+
+    private func distanceText(to pub: PubSearchResult) -> String? {
+        guard let userCoordinate else { return nil }
+        let meters = distance(from: userCoordinate, to: pub.coordinate)
+        if meters < 1000 {
+            return "\(Int(meters.rounded())) m"
+        }
+        return String(format: "%.1f km", meters / 1000)
+    }
+
+    private func distance(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> CLLocationDistance {
+        CLLocation(latitude: start.latitude, longitude: start.longitude)
+            .distance(from: CLLocation(latitude: end.latitude, longitude: end.longitude))
+    }
+}
+
+private struct PubMapRow: View {
+    let pub: PubSearchResult
+    let distanceText: String?
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            Image(systemName: "mug.fill")
+                .foregroundStyle(isSelected ? Theme.Palette.accent : Theme.Palette.beer)
+                .frame(width: 28, height: 28)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                HStack {
+                    Text(pub.name)
+                        .font(Theme.Typography.headline)
+                        .foregroundStyle(Theme.Palette.textPrimary)
+                        .lineLimit(1)
+                    Spacer()
+                    if let distanceText {
+                        Text(distanceText)
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.Palette.accent)
+                    }
+                }
+                if let address = pub.address {
+                    Text(address)
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Palette.textSecondary)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(.vertical, Theme.Spacing.xs)
+        .contentShape(Rectangle())
     }
 }
 

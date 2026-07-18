@@ -11,6 +11,8 @@ This build is tuned for a private friend group rather than public auth.
 - The beer picker has a searchable world-style catalog with country/style metadata.
 - Tapping the fill control animates the glass; the pint is saved when the glass reaches full.
 - The saved private note includes the selected beer name, so the confirmation can call it out.
+- The Pubs tab includes a live pub map based on current location, using on-demand When-In-Use
+  location and MapKit local search for nearby pubs, bars, breweries, and beer-friendly venues.
 
 ## Beer Display
 
@@ -49,3 +51,9 @@ env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl dev
 The project defaults to `CheekyPint-personal.entitlements` so it can install with a free
 personal Apple team. `CheekyPint.entitlements` is still present for a future paid-team build
 that wants Associated Domains or Sign in with Apple back.
+
+## Live Pub Map
+
+Open `Pubs` -> `Live pub map`. The screen asks for current location only when opened or refreshed,
+centres the map near the phone, drops mug markers for nearby venues, and lists results below the
+map with distance from the current location.

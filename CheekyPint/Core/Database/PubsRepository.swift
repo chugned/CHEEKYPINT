@@ -11,6 +11,10 @@ struct PubSearchResult: Identifiable, Sendable, Hashable {
     let countryCode: String?
     let latitude: Double
     let longitude: Double
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
 }
 
 private struct PubInsert: Encodable, Sendable {
@@ -31,11 +35,11 @@ struct PubsRepository: Sendable {
 
     /// Search nearby / by name+city. Region biases results when a coordinate is provided.
     func search(matching query: String, near coordinate: CLLocationCoordinate2D?) async throws -> [PubSearchResult] {
-        if await DemoWorld.shared.isActive { return await DemoWorld.shared.pubSearch() }
+        if await DemoWorld.shared.isActive && coordinate == nil { return await DemoWorld.shared.pubSearch() }
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = query.isEmpty ? "pub" : query
         if let coordinate {
-            request.region = MKCoordinateRegion(center: coordinate, latitudinalMeters: 4000, longitudinalMeters: 4000)
+            request.region = MKCoordinateRegion(center: coordinate, latitudinalMeters: 6000, longitudinalMeters: 6000)
         }
         if #available(iOS 13.0, *) {
             request.pointOfInterestFilter = MKPointOfInterestFilter(including: [.brewery, .restaurant, .nightlife])
