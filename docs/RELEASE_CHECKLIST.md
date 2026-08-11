@@ -52,3 +52,18 @@
 - [ ] All `docs/legal/*` templates reviewed by a qualified professional
 - [ ] Operator entity, address, DPO/contact, and processor/region details filled in
 - [ ] GDPR data-subject request process in place
+- [ ] **Art. 9 question resolved by qualified Austrian counsel** — whether the drink diary is
+      special-category health data ([DPIA.md](DPIA.md) §3.1). It is deliberately left unresolved in
+      that document. It must be answered **before launch**, because the answer determines the lawful
+      basis for the diary, whether explicit consent under Art. 9(2)(a) is required (nothing in the
+      app implements such a flow today), whether a DPIA is mandatory rather than prudent, whether a
+      DPO must be appointed, and whether `docs/legal/PRIVACY_POLICY.md:28` and
+      `docs/APP_PRIVACY_DATA_MAPPING.md:31` — which both state that no health data is collected —
+      are accurate
+- [ ] [DPIA.md](DPIA.md) (Art. 35) reviewed; every measure in its §4.2 (legal), §4.3 (operational)
+      and §4.4 (technical) closed or explicitly accepted; §8 decision and sign-off completed by the
+      controller. Do not record "proceed" while §3.1 is open
+- [ ] [RECORDS_OF_PROCESSING.md](RECORDS_OF_PROCESSING.md) (Art. 30) completed — controller identity,
+      Supabase region, Art. 28 DPA reference, transfer mechanism — and its §9 gap list reviewed. Both
+      documents cite the migrations by `file:line`; re-verify them against `supabase/migrations/`
+      whenever the schema changes
