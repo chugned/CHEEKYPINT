@@ -27,6 +27,11 @@
 		<key>UIColorName</key>
 		<string>BackgroundPrimary</string>
 	</dict>
+	<!-- Brand wordmark typeface (SIL OFL 1.1) — see THIRD_PARTY_NOTICES.md. -->
+	<key>UIAppFonts</key>
+	<array>
+		<string>Lobster-Regular.ttf</string>
+	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -38,15 +43,11 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 
-	<!-- Permission strings. Each is shown only after an in-app explanation (§17). -->
-	<key>NSCameraUsageDescription</key>
-	<string>CheekyPint uses the camera to scan friend and pub-session QR codes.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>CheekyPint uses your location while the app is open to help you find nearby pubs. Your location is not shared automatically.</string>
+	<!-- Profile photos are the only remaining permission-backed feature. -->
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>CheekyPint lets you choose a profile picture from your photo library.</string>
 
-	<!-- Custom-scheme deep links: cheekypint://friend/<token>, cheekypint://session/<token>. -->
+	<!-- Custom scheme retained for authentication callbacks only. -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

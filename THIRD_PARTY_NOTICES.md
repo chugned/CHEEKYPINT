@@ -13,6 +13,19 @@ MapKit + CoreLocation (pub search), PhotosUI (`PhotosPicker`), Security (Keychai
 
 Local package `CheekyPintCore` is first-party (this repository).
 
+## iOS app — bundled fonts
+
+| Component | Role | Licence |
+|-----------|------|---------|
+| [Lobster](https://github.com/googlefonts/lobster) (`Lobster-Regular.ttf`) | Display typeface, bundled and available via `Theme.Typography` | SIL Open Font License 1.1 |
+
+Copyright 2010 The Lobster Project Authors, with Reserved Font Name "Lobster". The font is *not*
+renamed or modified, and the full licence ships alongside it at
+`CheekyPint/Resources/Fonts/OFL.txt` (bundled into the app, satisfying OFL §2). It is registered
+through `UIAppFonts` in `Info.plist` and referenced only via `Theme.Typography`. Note the logo is
+no longer set in it — the wordmark is custom lettering shipped as artwork in `Wordmark.imageset`,
+so nothing currently draws with this font.
+
 > If a third-party iOS dependency is ever added, it must be listed here with its licence, be
 > actively maintained, be checked for privacy-manifest requirements, and be App Store compatible.
 

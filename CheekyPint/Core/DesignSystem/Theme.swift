@@ -16,6 +16,21 @@ enum Theme {
         static let beer = Color("AccentAmber")
         static let warning = Color("Warning")
         static let success = Color("Success")
+        /// Brand-only forest greens. Deeper and more organic than `accent`, they are reserved
+        /// for the logo lockup so the wordmark reads as the brand rather than as an action.
+        static let forest = Color("ForestGreen")
+        static let forestDeep = Color("ForestGreenDeep")
+    }
+
+    /// Brand gradients.
+    enum Gradients {
+        /// The wordmark runs moss → deep pine so the Lobster script has depth instead of a
+        /// flat fill. Both stops are asset colours, so Dark Mode inverts the ramp for legibility.
+        static let wordmark = LinearGradient(
+            colors: [Palette.forest, Palette.forestDeep],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
     /// 4-pt based spacing scale.
@@ -39,7 +54,14 @@ enum Theme {
 
     /// Typography scale. Rounded SF for warmth; text styles so Dynamic Type scales everything.
     enum Typography {
-        static let wordmark = Font.system(.title2, design: .rounded).weight(.heavy)
+        /// The Lobster script the logo is set in (bundled via `UIAppFonts`). `relativeTo:` keeps
+        /// the custom face on the Dynamic Type ramp; if registration ever fails, SwiftUI falls
+        /// back to the system face at the same size rather than dropping the wordmark.
+        private static let brandFace = "Lobster-Regular"
+        /// In-app wordmark (nav headers) — sits on the `.title2` ramp like the rest of the UI.
+        static let wordmark = Font.custom(brandFace, size: 34, relativeTo: .title2)
+        /// The splash lockup, where the logo is the only thing on screen and can breathe.
+        static let wordmarkLarge = Font.custom(brandFace, size: 58, relativeTo: .largeTitle)
         static let largeTitle = Font.system(.largeTitle, design: .rounded).weight(.bold)
         static let title = Font.system(.title2, design: .rounded).weight(.bold)
         static let headline = Font.system(.headline, design: .rounded)

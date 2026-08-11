@@ -33,9 +33,7 @@ struct LaunchView: View {
             Theme.Palette.backgroundPrimary.ignoresSafeArea()
             VStack(spacing: Theme.Spacing.md) {
                 PintGlassMark(size: 72)
-                Text("CheekyPint")
-                    .font(Theme.Typography.wordmark)
-                    .foregroundStyle(Theme.Palette.textPrimary)
+                Wordmark(scale: .splash)
             }
         }
         .accessibilityElement(children: .combine)
@@ -54,7 +52,7 @@ struct PintGlassMark: View {
                 .foregroundStyle(Theme.Palette.beer) // gold beer
             Image(systemName: "mug")
                 .font(.system(size: size))
-                .foregroundStyle(Theme.Palette.accent) // green rim
+                .foregroundStyle(Theme.Palette.forest) // forest-green rim, matching the wordmark
         }
         .accessibilityHidden(true)
     }
