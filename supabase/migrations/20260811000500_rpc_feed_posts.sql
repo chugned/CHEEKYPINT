@@ -140,8 +140,18 @@ as $$
          (select count(*)::int from public.post_cheers c where c.post_id = p.id),
          exists (select 1 from public.post_cheers c
                   where c.post_id = p.id and c.user_id = auth.uid()),
-         (select count(*)::int from public.post_comments cm
-           where cm.post_id = p.id and cm.deleted_at is null)
+         -- Mirror post_comments_page's filters exactly (20260811000600_rpc_feed_social.sql:193-196):
+         -- exclude a comment whose author the viewer has blocked, and exclude a comment whose
+         -- author's profile is soft-deleted. Without this, a feed row could advertise "1 comment"
+         -- for a thread that post_comments_page then serves as empty, leaking that a blocked-but-
+         -- still-active author exists.
+         (select count(*)::int
+            from public.post_comments cm
+            join public.profiles cpr on cpr.id = cm.author_id
+           where cm.post_id = p.id
+             and cm.deleted_at is null
+             and cpr.deleted_at is null
+             and not public.is_blocked(auth.uid(), cm.author_id))
     from public.posts p
     join public.profiles pr on pr.id = p.author_id
     join public.privacy_settings ps on ps.user_id = p.author_id

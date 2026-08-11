@@ -7,7 +7,8 @@ CheekyPint is a friendly, grown-up place to remember good nights at the pub. Kee
 ## Do
 
 - Be respectful and kind to your mates.
-- Keep your profile photo and text appropriate and truthful.
+- Keep your profile photo and text, and anything you post, comment, or @-mention in the feed,
+  appropriate and truthful.
 - Drink responsibly and look after each other.
 
 ## Don't

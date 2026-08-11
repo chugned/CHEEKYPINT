@@ -5,8 +5,10 @@ the user-facing policy template is [legal/PRIVACY_POLICY.md](legal/PRIVACY_POLIC
 
 ## Principles
 
-- **Friends-only ceiling.** Nothing is ever public. Every shareable field has a switch, default
-  friends-only, with **city and favourite pubs off by default**.
+- **Friends-only ceiling.** Every shareable *field* is friends-only-or-narrower and gated
+  server-side, with **city and favourite pubs off by default**. The one exception: avatar and
+  post-photo *bytes* sit in public-read storage buckets (unlisted, not access-controlled — see
+  "Known tradeoff" below), so "nothing is ever public" is not quite true.
 - **No precise location.** "City" is a broad, optional, user-typed area (e.g. "Graz, Austria").
   We never store a street address, and we never infer home from pub activity. Location is used
   only on demand for nearby-pub search (When-In-Use), never in the background.
@@ -16,8 +18,9 @@ the user-facing policy template is [legal/PRIVACY_POLICY.md](legal/PRIVACY_POLIC
 ## What we collect
 
 Account (auth id, email or Apple relay), profile (display name, optional username/bio/avatar/city),
-diary (drinks with serving/time/optional pub/optional private note), social graph (friends,
-blocks, reports), and minimal product analytics events. See
+diary (drinks with serving/time/optional pub/optional private note), feed content (post body,
+optional post photo, optional place label, comments, @-mentions), social graph (friends, blocks,
+reports), and minimal product analytics events. See
 [APP_PRIVACY_DATA_MAPPING.md](APP_PRIVACY_DATA_MAPPING.md).
 
 ## Analytics
@@ -32,15 +35,20 @@ identity.
 
 Access, correction, deletion, portability, and consent withdrawal. Export and in-app account
 deletion are available from Settings. Deletion anonymises + tears down app data immediately; the
-`delete-account` Edge Function completes storage + auth-user removal. See
+`delete-account` Edge Function completes storage (both the `avatars` and `post-images` buckets)
+and auth-user removal. See
 [legal/DATA_RETENTION_POLICY.md](legal/DATA_RETENTION_POLICY.md) and
 [legal/ACCOUNT_DELETION_POLICY.md](legal/ACCOUNT_DELETION_POLICY.md).
 
 ## Known tradeoff
 
-Avatars live in a public-read bucket with unguessable, per-user filenames; avatar paths are only
-returned when visibility permits, so images are unlisted rather than strictly access-controlled.
-A hardening pass can move to signed URLs. Documented in [SECURITY.md](SECURITY.md).
+Avatars and post photos both live in public-read buckets (`avatars`, `post-images`) with
+unguessable, per-user filenames; the paths are only returned to a client when the friends-only
+visibility rules permit it, so the images are unlisted rather than strictly access-controlled —
+anyone holding a URL (screenshot, forwarded link, scraped before a block) can fetch the bytes
+directly, with no `Authorization` header, forever. A hardening pass can move both buckets to
+signed URLs. Documented in [SECURITY.md](SECURITY.md) and, for post photos specifically, in
+[MODERATION.md](MODERATION.md).
 
 ## Processors
 

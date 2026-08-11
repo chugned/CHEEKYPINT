@@ -18,6 +18,8 @@ Protection Regulation (GDPR) and applicable Austrian law.
 - **Profile:** display name; optional username, bio, avatar, and broad city/country.
 - **Diary:** drinks you log (serving type, time, alcohol-free flag, optional private note),
   optional pub selections and visit history.
+- **Feed:** posts you share with friends (body text, optional photo, optional place label),
+  comments you or your friends write, and @-mentions within comments.
 - **Social:** friends, blocks, and reports you create.
 - **Device/location:** precise location **only** while you actively use nearby-pub search
   (When-In-Use); it is not stored or shared. We do not use background or "Always" location.

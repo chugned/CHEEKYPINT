@@ -28,8 +28,11 @@ to [SECURITY.md](SECURITY.md) and the tested policies/functions.
   `underage_concern`. Not identity verification (out of scope, invasive).
 - **Fake totals:** self-reported by design; idempotency + rate limits + impossible-frequency
   flags reduce inflation; totals are clearly self-reported and never celebrated when clustered.
-- **UGC (photos/text):** length limits + sanitisation, block/report/remove, admin disable,
-  constrained social surface (no posts/DMs/feeds). See [MODERATION.md](MODERATION.md).
+- **UGC (photos/text):** length limits + sanitisation, block/report/remove, admin disable. The
+  feed is friends-only posts, comments, cheers, and @-mentions — never a public feed, and no
+  direct-message or anonymous-chat surface. Every read and write goes through a `security
+  definer` RPC that re-derives friendship/block state per call rather than trusting a client-held
+  id. See [MODERATION.md](MODERATION.md) for the full mechanism and its known residual gaps.
 
 ## Out of scope (MVP)
 

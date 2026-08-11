@@ -523,13 +523,16 @@ end $$;
 -- the friend recruited to isolate the mention checks from Alice's own social graph.
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
 
--- I4 regression: a mention target must ALSO be able to see the post, not merely be a friend of
--- the commenter. t37 alone cannot prove this half of the check, because Dev fails BOTH the
--- friendship test and the visibility test there. Make Barnaby and Dev friends first, so the
--- ONLY thing left that can reject this comment is Dev's inability to see ALICE's post (she
--- blocked him) — isolating the can_view_post half of the mention check from the
+-- I2 regression: a mention target who IS the commenter's accepted friend but who cannot
+-- independently see the post (here, because the post's author has blocked them) must be
+-- SILENTLY DROPPED from the mention list, not rejected. Raising here would be a friend-graph
+-- oracle: Barnaby already knows Dev is his friend, so a rejection distinguishable from "not your
+-- friend" could only be explained by some hidden relationship between Dev and Alice (the post's
+-- author) that Barnaby has no way to see directly — e.g. that Alice blocked Dev. Make Barnaby and
+-- Dev friends first, so the ONLY thing that could otherwise reject this comment is Dev's
+-- inability to see ALICE's post, isolating the can_view_post half of the mention check from the
 -- is_accepted_friend half.
-do $$ declare v_post uuid; v_req jsonb; ok boolean := false; begin
+do $$ declare v_post uuid; v_req jsonb; v jsonb; v_comment_id uuid; v_mentions uuid[]; begin
   select public.send_friend_request('00000000-0000-4000-8000-0000000000d4') into v_req;
 
   perform set_config('app.uid', '00000000-0000-4000-8000-0000000000d4', false);
@@ -540,14 +543,18 @@ do $$ declare v_post uuid; v_req jsonb; ok boolean := false; begin
     where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
   if v_post is null then raise exception 'FAIL t37b: no Alice post available'; end if;
 
-  begin
-    perform public.add_comment(v_post, 'hi', array['00000000-0000-4000-8000-0000000000d4'::uuid]);
-  exception when others then ok := true;
-  end;
-  if not ok then
-    raise exception 'FAIL t37b: mentioned a friend who cannot see the post (blocked by its author)';
+  select public.add_comment(v_post, 'hi', array['00000000-0000-4000-8000-0000000000d4'::uuid]) into v;
+  if (v->>'comment_id') is null then
+    raise exception 'FAIL t37b: add_comment was rejected for mentioning a friend who cannot see the post (want silent drop, not rejection)';
   end if;
-  raise notice 'PASS t37b: mention target must also be able to view the post, not merely be a friend of the commenter';
+  v_comment_id := (v->>'comment_id')::uuid;
+
+  select mentioned_user_ids into v_mentions from public.post_comments_page(v_post, null, null, 20)
+    where comment_id = v_comment_id and author_id = '00000000-0000-4000-8000-0000000000b2';
+  if v_mentions is distinct from array[]::uuid[] then
+    raise exception 'FAIL t37b: mention of a friend who cannot see the post was recorded anyway, got %', v_mentions;
+  end if;
+  raise notice 'PASS t37b: a friend who cannot independently view the post is silently dropped from the mention, not rejected';
 end $$;
 
 -- I7 regression: pin the friends-only mention rule in isolation from post VISIBILITY. This
@@ -795,6 +802,123 @@ do $$ declare v_post uuid; v_comment uuid; v jsonb; ss text; begin
   if ss is distinct from 'P0002' then
     raise exception 'FAIL t43d: invisible-post comment report rejected with % (want P0002)', ss; end if;
   raise notice 'PASS t43d: cannot report a comment on a post you cannot see';
+end $$;
+
+-- ============================ FEED: comment_count block/soft-delete parity (I1) ============================
+-- feed_page's comment_count previously counted every non-deleted comment regardless of the
+-- viewer's relationship to the comment's author, while post_comments_page (the actual thread
+-- read) already excluded comments by blocked authors and soft-deleted profiles
+-- (20260811000600_rpc_feed_social.sql:203-205). That mismatch let a feed row advertise "1
+-- comment" for a thread that opens empty, leaking that a blocked user is still active. Ceri
+-- becomes Barnaby's friend so she can legitimately comment on his post; Alice then blocks Ceri
+-- and must see the count drop to zero, matching the (already-correct) empty thread read.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000c3';
+do $$ declare v_req jsonb; begin
+  select public.send_friend_request('00000000-0000-4000-8000-0000000000b2') into v_req;
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000b2', false);
+  perform public.respond_to_friend_request((v_req->>'friendship_id')::uuid, true);
+  raise notice 'PASS t44 setup: Ceri and Barnaby become friends';
+end $$;
+
+do $$ declare v jsonb; begin
+  select public.create_post('t44 setup: Barnaby post for the comment_count check', null, null, null) into v;
+  if (v->>'post_id') is null then raise exception 'FAIL t44: Barnaby could not create a post'; end if;
+  raise notice 'PASS t44 setup: Barnaby creates a post for the comment_count check';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000c3';
+do $$ declare v_post uuid; begin
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000b2'
+    order by created_at desc limit 1;
+  if v_post is null then raise exception 'FAIL t44: no Barnaby post available for Ceri to comment on'; end if;
+  perform public.add_comment(v_post, 'Ceri comment that Alice must not be able to count', null);
+  raise notice 'PASS t44 setup: Ceri comments on Barnaby''s post';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ begin
+  perform public.block_user('00000000-0000-4000-8000-0000000000c3');
+  raise notice 'PASS t44 setup: Alice blocks Ceri';
+end $$;
+
+do $$ declare v_post uuid; v_count int; v_thread_count int; begin
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000b2'
+    order by created_at desc limit 1;
+  if v_post is null then raise exception 'FAIL t44: Alice cannot see Barnaby''s post at all'; end if;
+
+  select comment_count into v_count from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000b2' and post_id = v_post;
+  if v_count is distinct from 0 then
+    raise exception 'FAIL t44: Alice''s feed shows comment_count % for a post whose only comment is from someone she blocked (want 0)', v_count;
+  end if;
+
+  select count(*) into v_thread_count from public.post_comments_page(v_post, null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000c3';
+  if v_thread_count is distinct from 0 then
+    raise exception 'FAIL t44: Alice''s thread read returned % comments from the blocked author Ceri (want 0)', v_thread_count;
+  end if;
+
+  raise notice 'PASS t44: feed_page.comment_count excludes comments by a blocked author, matching post_comments_page''s empty thread';
+end $$;
+
+-- ============================ FEED: feed_page avatar-visibility gate (I12) ============================
+-- feed_page's avatar gate (20260811000500_rpc_feed_posts.sql:133-134) had zero test coverage —
+-- t36a covers post_comments_page's equivalent gate, but nothing here ever checked feed_page's own
+-- gate in either direction. Barnaby's avatar_path was set to 'b2/barnaby.jpg' back in t36a and his
+-- avatar_visibility still defaults to 'friends'. This pins BOTH failure directions the gate could
+-- silently regress to: (1) a friend must actually RECEIVE the avatar under the default
+-- avatar_visibility = 'friends' — a regression that collapsed the gate to "self only" (e.g. the
+-- `or ps.avatar_visibility = 'friends'` clause deleted outright) would still coincidentally pass a
+-- test that only ever checked the 'private' case, since a friend gets NULL either way once
+-- visibility is private; (2) flipping to avatar_visibility = 'private' must then blank the field
+-- for that same friend, while the author reading their own post still gets the path regardless.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare v_avatar_friend text; v_post uuid; begin
+  select post_id, avatar_path into v_post, v_avatar_friend from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000b2'
+    order by created_at desc limit 1;
+  if v_post is null then raise exception 'FAIL t45: Alice cannot see any Barnaby post'; end if;
+  if v_avatar_friend is distinct from 'b2/barnaby.jpg' then
+    raise exception 'FAIL t45: Alice (a friend) did not receive Barnaby''s avatar_path under the default avatar_visibility = friends, got %', v_avatar_friend;
+  end if;
+  raise notice 'PASS t45: feed_page grants a friend the avatar_path when avatar_visibility = friends (the default)';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
+do $$ begin
+  update public.privacy_settings set avatar_visibility = 'private' where user_id = auth.uid();
+  raise notice 'PASS t45 setup: Barnaby sets avatar_visibility to private';
+end $$;
+
+do $$ declare v_avatar_self text; v_post uuid; begin
+  select post_id, avatar_path into v_post, v_avatar_self from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000b2'
+    order by created_at desc limit 1;
+  if v_post is null then raise exception 'FAIL t45: no Barnaby post available'; end if;
+  if v_avatar_self is distinct from 'b2/barnaby.jpg' then
+    raise exception 'FAIL t45: Barnaby reading his own feed row got avatar_path %, want his own path regardless of avatar_visibility', v_avatar_self;
+  end if;
+  raise notice 'PASS t45: the post author still sees their own avatar_path with avatar_visibility = private';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare v_avatar_friend text; v_post uuid; begin
+  select post_id, avatar_path into v_post, v_avatar_friend from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000b2'
+    order by created_at desc limit 1;
+  if v_post is null then raise exception 'FAIL t45: Alice cannot see any Barnaby post'; end if;
+  if v_avatar_friend is not null then
+    raise exception 'FAIL t45: Alice (a friend) received Barnaby''s avatar_path % despite avatar_visibility = private', v_avatar_friend;
+  end if;
+  raise notice 'PASS t45: feed_page blanks avatar_path for a friend when the author''s avatar_visibility = private';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
+do $$ begin
+  update public.privacy_settings set avatar_visibility = 'friends' where user_id = auth.uid();
+  raise notice 'PASS t45 cleanup: Barnaby restores avatar_visibility to friends';
 end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';

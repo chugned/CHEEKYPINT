@@ -16,20 +16,27 @@ in the client) via `feed_page` / `post_comments_page` and the checks below:
 
 - A post is visible to its author or to an accepted friend of the author, and never to anyone the
   author has blocked (or who has blocked the author) — `public.feed_page`
-  (`supabase/migrations/20260811000500_rpc_feed_posts.sql:150`), gated through
+  (`supabase/migrations/20260811000500_rpc_feed_posts.sql:160`), gated through
   `public.is_accepted_friend`, which itself checks `not public.is_blocked(a, b)`
   (`supabase/migrations/20260101000600_security_helpers.sql:26-41`).
 - The comment/cheers entry points (`toggle_post_cheers`, `add_comment`, `post_comments_page`)
   re-derive the same visibility from `public.can_view_post` rather than trusting that a caller
   holding a post id may act on it (`supabase/migrations/20260811000600_rpc_feed_social.sql:5-19`,
-  used at lines 33, 81, 195). `delete_comment` is the one entry point that does **not** call
+  used at lines 33, 82, 204). `delete_comment` is the one entry point that does **not** call
   `can_view_post`; its own `author_id = v_uid` check (below) is strictly narrower, so this is not a
   gap. `post_comments_page` additionally excludes any comment whose author the viewer has blocked,
   even within a thread the viewer can otherwise see
-  (`supabase/migrations/20260811000600_rpc_feed_social.sql:196`).
-- @-mentions in comments are restricted to people the commenter is an accepted friend of, **and**
-  who can independently see the post being commented on — mentioning a friend into a thread they
-  cannot view is rejected (`supabase/migrations/20260811000600_rpc_feed_social.sql:98-104`).
+  (`supabase/migrations/20260811000600_rpc_feed_social.sql:205`).
+- @-mentions in comments are restricted to people the commenter is an accepted friend of —
+  mentioning a non-friend raises `Can only mention friends`
+  (`supabase/migrations/20260811000600_rpc_feed_social.sql:106-114`). A friend who cannot
+  independently see the post being commented on (e.g. the post's author has blocked them) is
+  **silently dropped** from the mention rather than raising: raising would let the commenter probe
+  a private edge of someone else's social graph — a target's friendship with the *commenter* is
+  something the commenter already knows, but a rejection distinguishable from "not your friend"
+  would additionally disclose that the target and the post's author have some hidden relationship
+  (a block, or a visibility setting) the commenter has no way to see directly. Mention
+  notifications are an explicit non-goal, so the dropped mention has no other observable effect.
 - Posts and post tables (`posts`, `post_cheers`, `post_comments`, `comment_mentions`) have RLS
   enabled with no policies and all privileges revoked from `public`/`anon`/`authenticated`: every
   read and write goes through a `security definer` RPC, never a direct table grant
@@ -37,8 +44,15 @@ in the client) via `feed_page` / `post_comments_page` and the checks below:
 - Authors can soft-delete their own posts and comments (`deleted_at`); a post's author cannot
   delete another user's comment on that post — `delete_comment` only matches
   `author_id = v_uid`, with no clause referencing the post's owner at all
-  (`supabase/migrations/20260811000600_rpc_feed_social.sql:120-143`), and `delete_post` is likewise
+  (`supabase/migrations/20260811000600_rpc_feed_social.sql:129-152`), and `delete_post` is likewise
   gated on `author_id = v_uid` (`supabase/migrations/20260811000500_rpc_feed_posts.sql:78-86`).
+  Concretely: if a friend posts something abusive as a *comment* on your post, you cannot remove
+  it yourself. Blocking that commenter only hides the comment from you specifically —
+  `post_comments_page`'s block filter is keyed on the viewer
+  (`supabase/migrations/20260811000600_rpc_feed_social.sql:205`), so every other friend who can
+  see the thread still sees the comment unchanged. The only current remedies are deleting the
+  whole post (which takes the comment down with it) or reporting the comment via `report_comment`
+  for a moderator to act on. Post-owner comment moderation is deferred, not shipped.
 
 **Known tradeoff — post photos are unlisted, not access-controlled.** The `post-images` storage
 bucket is created with `public = true`
@@ -64,7 +78,12 @@ after RPC authorisation.
   scrubbed: `feed_page`'s `cheers_count` still counts a cheer the now-blocked party left before
   the block (no identity is exposed, only the total), and `post_comments_page`'s
   `mentioned_user_ids` array can still contain a blocked user's UUID from a mention made before
-  the block (an opaque id, not their profile).
+  the block (an opaque id, not their profile). `feed_page`'s `comment_count` is deliberately *not*
+  on this list: it is filtered by the same block and soft-deleted-profile rules as
+  `post_comments_page` itself (`supabase/migrations/20260811000500_rpc_feed_posts.sql:143-154`,
+  mirroring `20260811000600_rpc_feed_social.sql:203-206`), so the number a feed row shows always
+  agrees with what the thread read actually returns — it cannot advertise a comment the reader
+  will then find the thread empty of.
 - **Report** — one shared moderation queue (`public.reports`) covers accounts, posts, and
   comments:
   - `report_user(target, category, details)` — accounts
@@ -94,10 +113,19 @@ after RPC authorisation.
   permits direct DML from the client with only an ownership check (`id = auth.uid()`), so this
   sanitisation is **client-side only** and bypassable by a client that skips it — the same class of
   gap the feed-body sanitiser below closes for post/comment text, just not yet closed here.
-- Username validation + reserved-word list to reduce impersonation (`admin`, `support`, …).
+- Username validation + reserved-word list to reduce impersonation (`admin`, `support`, …) — this
+  control is **client-side only** (`CheekyPintCore`'s `UsernameValidator`
+  (`CheekyPintCore/Sources/CheekyPintCore/Validation/UsernameValidator.swift`)). The database's own
+  `username_format` check (`supabase/migrations/20260101000200_core_tables.sql:11-12`) enforces
+  only a character-set/length regex, with no reserved-word awareness, and `profiles_update_self`
+  permits direct DML — the same client-only-sanitiser bypass disclosed two bullets above for the
+  display-name/bio sanitiser applies here too: a client that skips `UsernameValidator` can claim
+  `admin` or `support` outright.
 - Resized avatars only; storage writes restricted to the user's own folder.
-- Pub suggestions (`pubs.name`, `formatted_address`) have no length cap beyond the column type, no
-  rate limit, and no sanitiser — `pubs_insert_authenticated`
+- Pub suggestions: `pubs.name` has a database-enforced length cap
+  (`pub_name_length` check, 1–120 chars, `supabase/migrations/20260101000400_pub_tables.sql:10`),
+  but `formatted_address` has no length cap beyond the column type. Neither has a rate limit or a
+  sanitiser — `pubs_insert_authenticated`
   (`supabase/migrations/20260101000700_rls_policies.sql:84-85`) only checks
   `created_by = auth.uid()`. Unlike feed posts/comments, this is direct RLS-governed DML with no
   RPC in front of it at all.
@@ -124,9 +152,15 @@ after RPC authorisation.
 - `reports` table is a queue (`open → reviewing → actioned → dismissed`) with indexes on
   `(status, created_at)`, `reported_user_id`, and now also `post_id` / `comment_id` for content
   reports (`supabase/migrations/20260811000400_feed_reports.sql:14-15`).
-- An administrator can disable an abusive profile by setting `profiles.deleted_at` (removes it
-  from every surface) via the service role / an internal tool. A dedicated admin RPC and audit
-  log are a fast-follow.
+- An administrator can disable an abusive profile by setting `profiles.deleted_at` via the service
+  role / an internal tool. This is complete on every **read** path: `pr.deleted_at is null` gates
+  the profile out of `feed_page`, `post_comments_page`, and friend-facing lookups alike. It is
+  **not** complete on the write side — `create_post`, `add_comment`, and `toggle_post_cheers` only
+  check `auth.uid() is null` and (for comments/cheers) `can_view_post`; none of them re-checks
+  whether the *caller's own* `profiles.deleted_at` is set. A disabled account's JWT is untouched
+  (disabling is a `profiles` update, not an `auth.users` deletion), so a disabled account can still
+  post, comment, and cheer — it simply becomes invisible to others while doing so. A dedicated
+  admin RPC, a caller-side `deleted_at` guard, and an audit log are a fast-follow.
 - Support contact: `support@cheekypint.app` (placeholder).
 
 ## Escalation

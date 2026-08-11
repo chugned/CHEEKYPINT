@@ -76,6 +76,7 @@ declare
   v_body text;
   v_row public.post_comments;
   v_mention uuid;
+  v_mention_ids uuid[] := array[]::uuid[];
 begin
   if v_uid is null then raise exception 'Not authenticated' using errcode = '28000'; end if;
   if not public.can_view_post(v_uid, p_post_id) then
@@ -90,16 +91,25 @@ begin
   end if;
 
   -- You can only mention people you are actually friends with; this closes the obvious
-  -- harassment vector of tagging strangers into a thread. A friend of the COMMENTER is not
-  -- automatically able to see this POST — e.g. the post author blocked them — so the mention
-  -- target must also independently pass can_view_post, or the mention would tie a person into
-  -- a thread they have no visibility into (and no way to know they were named in). `is distinct
-  -- from` (not `<>`) keeps a NULL array element from silently skipping this check.
+  -- harassment vector of tagging strangers into a thread, and the rejection here is safe to
+  -- surface because the commenter already knows their own friend list.
+  --
+  -- A friend of the COMMENTER is not automatically able to see this POST — e.g. the post author
+  -- blocked them. That second case must NOT raise: the commenter is not necessarily aware of the
+  -- private relationship (a block, or a visibility setting) between the mention target and the
+  -- post's author, so a distinguishable rejection here would let the commenter probe up to 60
+  -- friend/post pairs an hour and learn a fact about someone else's graph they have no business
+  -- knowing. Instead, silently drop that target from the mention list — the comment itself still
+  -- posts normally. Nothing is lost: mention notifications are an explicit spec non-goal, so a
+  -- silently-omitted mention has no observable side effect for the dropped target either way.
+  -- `is distinct from` (not `<>`) keeps a NULL array element from silently skipping this check.
   foreach v_mention in array coalesce(p_mentions, array[]::uuid[]) loop
-    if v_mention is distinct from v_uid
-       and (not public.is_accepted_friend(v_uid, v_mention)
-            or not public.can_view_post(v_mention, p_post_id)) then
-      raise exception 'Can only mention friends' using errcode = 'P0002';
+    if v_mention is distinct from v_uid then
+      if not public.is_accepted_friend(v_uid, v_mention) then
+        raise exception 'Can only mention friends' using errcode = 'P0002';
+      elsif public.can_view_post(v_mention, p_post_id) then
+        v_mention_ids := array_append(v_mention_ids, v_mention);
+      end if;
     end if;
   end loop;
 
@@ -109,8 +119,7 @@ begin
 
   insert into public.comment_mentions (comment_id, mentioned_user_id)
   select v_row.id, m
-    from unnest(coalesce(p_mentions, array[]::uuid[])) as m
-   where m is distinct from v_uid
+    from unnest(v_mention_ids) as m
   on conflict do nothing;
 
   return jsonb_build_object('comment_id', v_row.id);

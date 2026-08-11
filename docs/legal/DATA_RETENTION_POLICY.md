@@ -26,8 +26,8 @@ the service safe.
 1. Profile is anonymised and marked deleted (disappears from all surfaces immediately).
 2. Friend tokens revoked; friendships and blocks removed; sessions left.
 3. Pint entries soft-deleted, then purged on the schedule above.
-4. Avatar files removed from storage; the auth user is deleted (cascade) by the
-   `delete-account` Edge Function.
+4. Avatar files and post photo files removed from storage; the auth user is deleted (cascade) by
+   the `delete-account` Edge Function.
 
 See the [Account Deletion Policy](ACCOUNT_DELETION_POLICY.md).
 

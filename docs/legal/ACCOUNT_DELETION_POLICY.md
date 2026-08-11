@@ -17,8 +17,9 @@ confirm, and may ask you to re-authenticate.
 2. Your friend codes are revoked; friendships and blocks are removed; active sessions are left.
 3. Your pint diary and pub visits are soft-deleted and then purged per the
    [Data Retention Policy](DATA_RETENTION_POLICY.md).
-4. Your profile photo is removed from storage and your authentication account is deleted (this
-   cascade is completed by the `delete-account` Edge Function using the service role).
+4. Your profile photo and any photos on your posts are removed from storage and your
+   authentication account is deleted (this cascade is completed by the `delete-account` Edge
+   Function using the service role).
 5. You are signed out and shown a confirmation.
 
 ## What may remain

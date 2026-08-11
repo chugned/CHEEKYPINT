@@ -16,6 +16,9 @@ Legend — Linked: tied to the user's identity. Tracking: used to track across a
 | Pint entries (serving, time, alcohol-free) | User Content → Other | App functionality (the diary) | Yes | No |
 | Private notes | User Content → Other | App functionality | Yes | No |
 | Pub selections / visit history | User Content → Other | App functionality | Yes | No |
+| Post body / place label (friends-only feed) | User Content → Other | App functionality (feed) | Yes | No |
+| Post photo (friends-only feed) | User Content → Photos or Videos | App functionality (feed) | Yes | No |
+| Comments / @-mentions (friends-only feed) | User Content → Other | App functionality (feed) | Yes | No |
 | Friends / blocks / reports | User Content → Other · Contacts (no) | App functionality | Yes | No |
 | Product analytics events | Usage Data → Product Interaction | Analytics (improve app) | No² | No |
 | Diagnostics (crash, if enabled) | Diagnostics → Crash Data | App functionality / diagnostics | No | No |

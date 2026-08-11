@@ -6,7 +6,8 @@
 //   1. Authenticate the caller from their JWT.
 //   2. Run delete_account() AS the caller (anonymise + soft-delete their data).
 //   3. Delete their avatar folder from the `avatars` bucket.
-//   4. Delete the auth user (which cascades and removes the profile + remaining rows).
+//   4. Delete their post-photo folder from the `post-images` bucket.
+//   5. Delete the auth user (which cascades and removes the profile + remaining rows).
 //
 // The service-role key lives ONLY in the Edge Function environment and never touches the app.
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -36,7 +37,7 @@ Deno.serve(async (req: Request) => {
   const { error: rpcErr } = await asUser.rpc("delete_account");
   if (rpcErr) return json({ error: `delete_account failed: ${rpcErr.message}` }, 400);
 
-  // 3 + 4 need elevated privileges.
+  // 3-5 need elevated privileges.
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
@@ -48,7 +49,18 @@ Deno.serve(async (req: Request) => {
     await admin.storage.from("avatars").remove(paths);
   }
 
-  // 4. Delete the auth user (cascades to profile + any remaining rows).
+  // 4. Remove the user's post-photo folder. Without this, step 5's cascade (auth.users →
+  // profiles → posts) hard-deletes the posts rows that hold the only copies of image_path,
+  // stranding the objects themselves in a public = true bucket
+  // (supabase/migrations/20260811000200_feed_storage.sql:12-14) — fetchable with no
+  // Authorization header, forever, with nothing left in the database to enumerate them.
+  const { data: postFiles } = await admin.storage.from("post-images").list(userId);
+  if (postFiles && postFiles.length > 0) {
+    const postPaths = postFiles.map((f) => `${userId}/${f.name}`);
+    await admin.storage.from("post-images").remove(postPaths);
+  }
+
+  // 5. Delete the auth user (cascades to profile + any remaining rows).
   const { error: delErr } = await admin.auth.admin.deleteUser(userId);
   if (delErr) return json({ error: `auth deletion failed: ${delErr.message}` }, 500);
 

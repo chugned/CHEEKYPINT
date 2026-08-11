@@ -587,8 +587,8 @@ git commit -m "feat: add feed post RPCs"
   - `public.toggle_post_cheers(p_post_id uuid) returns jsonb` → `{"cheered": boolean, "cheers_count": int}`
   - `public.add_comment(p_post_id uuid, p_body text, p_mentions uuid[]) returns jsonb` → `{"comment_id": uuid}`
   - `public.delete_comment(p_comment_id uuid) returns void`
-  - `public.post_comments_page(p_post_id uuid, p_before timestamptz, p_limit int) returns table (comment_id uuid, author_id uuid, display_name text, avatar_path text, body text, created_at timestamptz, mentioned_user_ids uuid[])`
-  - `public.can_view_post(p_uid uuid, p_post_id uuid) returns boolean` (internal helper, granted to `authenticated` for the other RPCs' use)
+  - `public.post_comments_page(p_post_id uuid, p_before timestamptz, p_before_id uuid, p_limit int) returns table (comment_id uuid, author_id uuid, display_name text, avatar_path text, body text, created_at timestamptz, mentioned_user_ids uuid[])`
+  - `public.can_view_post(p_uid uuid, p_post_id uuid) returns boolean` (internal helper; the shipped code revokes it from `public`/`anon`/`authenticated` — every RPC above calls it as its SECURITY DEFINER owner, not via a direct grant)
 
 - [ ] **Step 1: Write the failing tests**
 

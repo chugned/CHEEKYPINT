@@ -153,7 +153,7 @@ folder (`{user_id}/…`), reads gated through the feed RPCs.
 | `toggle_post_cheers(post_id)` | Insert or delete; returns new state + count |
 | `add_comment(post_id, body, mentioned_user_ids[])` | Validates mentions are accepted friends |
 | `delete_comment(comment_id)` | Author only; soft delete |
-| `post_comments_page(post_id, before, limit)` | Block-aware |
+| `post_comments_page(post_id, before, before_id, limit)` | Block-aware |
 | `report_post(post_id, category, details)` | Into the existing `reports` queue |
 | `report_comment(comment_id, category, details)` | Into the existing `reports` queue |
 
