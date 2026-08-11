@@ -436,6 +436,89 @@ begin
   raise notice 'PASS t34c: keyset cursor advances to page 2 without repeating page 1''s rows';
 end $$;
 
+-- ============================ FEED: cheers, comments, mentions ============================
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+
+do $$ declare v_post uuid; v jsonb; begin
+  -- Filter by author: Task 3's t34c seeded Ceri-owned posts, so an unfiltered limit 1 is
+  -- no longer deterministic under Alice's identity.
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
+  if v_post is null then raise exception 'FAIL: no Alice post available'; end if;
+  select public.toggle_post_cheers(v_post) into v;
+  if (v->>'cheered')::boolean is not true then raise exception 'FAIL t35: first toggle did not cheer'; end if;
+  if (v->>'cheers_count')::int <> 1 then raise exception 'FAIL t35: count % (want 1)', v->>'cheers_count'; end if;
+  select public.toggle_post_cheers(v_post) into v;
+  if (v->>'cheered')::boolean is not false then raise exception 'FAIL t35: second toggle did not un-cheer'; end if;
+  if (v->>'cheers_count')::int <> 0 then raise exception 'FAIL t35: count % (want 0)', v->>'cheers_count'; end if;
+  raise notice 'PASS t35: toggle_post_cheers is idempotent per user and counts correctly';
+end $$;
+
+do $$ declare v_post uuid; v jsonb; v_body text; v_mentions uuid[]; begin
+  -- Filter by author: Task 3's t34c seeded Ceri-owned posts, so an unfiltered limit 1 is
+  -- no longer deterministic under Alice's identity.
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
+  if v_post is null then raise exception 'FAIL: no Alice post available'; end if;
+  select public.add_comment(v_post, 'nice one' || chr(8203) || '!',
+                            array['00000000-0000-4000-8000-0000000000b2'::uuid]) into v;
+  if (v->>'comment_id') is null then raise exception 'FAIL t36: add_comment returned no id'; end if;
+  select body, mentioned_user_ids into v_body, v_mentions
+    from public.post_comments_page(v_post, null, 20) limit 1;
+  if v_body is distinct from 'nice one!' then raise exception 'FAIL t36: comment body not sanitised, got %', v_body; end if;
+  if v_mentions is distinct from array['00000000-0000-4000-8000-0000000000b2'::uuid] then
+    raise exception 'FAIL t36: mentions % wrong', v_mentions; end if;
+  raise notice 'PASS t36: add_comment sanitises the body and records mentions';
+end $$;
+
+-- Dev is blocked by Alice, so he is not a mentionable friend.
+do $$ declare v_post uuid; ok boolean := false; begin
+  -- Filter by author: Task 3's t34c seeded Ceri-owned posts, so an unfiltered limit 1 is
+  -- no longer deterministic under Alice's identity.
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
+  if v_post is null then raise exception 'FAIL: no Alice post available'; end if;
+  if v_post is null then raise exception 'FAIL t37: no post to comment on'; end if;
+  begin
+    perform public.add_comment(v_post, 'hi', array['00000000-0000-4000-8000-0000000000d4'::uuid]);
+  exception when others then ok := true;
+  end;
+  if not ok then raise exception 'FAIL t37: mentioned a non-friend'; end if;
+  raise notice 'PASS t37: mentioning a non-friend is rejected';
+end $$;
+
+-- Ceri is Alice's friend but not Barnaby's, so Ceri must not reach Barnaby's post.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
+do $$ declare v jsonb; v_post uuid; ok_cheer boolean := false; ok_comment boolean := false; begin
+  select public.create_post('Barnaby was here', null, null, null) into v;
+  v_post := (v->>'post_id')::uuid;
+  -- Ceri is Alice's friend but not Barnaby's, and nobody has blocked anybody here: this is the
+  -- non-friend, non-blocked case that distinguishes friends-only from merely not-blocked.
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000c3', false);
+  begin
+    perform public.toggle_post_cheers(v_post);
+  exception when others then ok_cheer := true;
+  end;
+  begin
+    perform public.add_comment(v_post, 'sneaking in', null);
+  exception when others then ok_comment := true;
+  end;
+  if not ok_cheer then raise exception 'FAIL t38: a non-friend cheered a post they cannot see'; end if;
+  if not ok_comment then raise exception 'FAIL t38: a non-friend commented on a post they cannot see'; end if;
+  raise notice 'PASS t38: cheers and comments require visibility of the post';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare v_post uuid; v_comment uuid; v_count int; begin
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
+  select comment_id into v_comment from public.post_comments_page(v_post, null, 20) limit 1;
+  perform public.delete_comment(v_comment);
+  select count(*) into v_count from public.post_comments_page(v_post, null, 20) where comment_id = v_comment;
+  if v_count <> 0 then raise exception 'FAIL t38: soft-deleted comment still visible'; end if;
+  raise notice 'PASS t38: delete_comment hides the comment';
+end $$;
+
 reset role;
 \echo '-------------------------------------------'
 \echo 'ALL RLS/RPC CHECKS PASSED'
