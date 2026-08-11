@@ -42,7 +42,7 @@ struct LeaderboardRowView: View {
                 if row.isCurrentUser {
                     Text("You").font(Theme.Typography.caption).foregroundStyle(Theme.Palette.textSecondary)
                 } else if nudgeState == .received {
-                    Text("Cheered you")
+                    Text("Nudged you")
                         .font(Theme.Typography.caption.weight(.semibold))
                         .foregroundStyle(Theme.Palette.accent)
                 }
