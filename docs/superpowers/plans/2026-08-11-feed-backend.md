@@ -33,7 +33,7 @@
   end $$;
   ```
 - Compare expected values with `is distinct from`, not `<>` — a NULL left-hand side makes `<>` yield NULL, the `if` is skipped, and the test passes vacuously.
-- Test style, matching the existing suite: switch identity with `reset role; set role authenticated; set app.uid = '<uuid>';` then a `do $$ begin ... raise exception 'FAIL tN: ...'; ... raise notice 'PASS tN: ...'; end $$;` block. Continue the existing `tN` numbering — the suite currently ends at **t25**, so start at **t26**.
+- Test style, matching the existing suite: switch identity with `reset role; set role authenticated; set app.uid = '<uuid>';` then a `do $$ begin ... raise exception 'FAIL tN: ...'; ... raise notice 'PASS tN: ...'; end $$;` block. Continue the existing `tN` numbering — Task 3 left the suite ending at **t34**, so Task 4 starts at **t35**.
 - Seeded identities and relationships (from `supabase/seed.sql`): Alice `00000000-0000-4000-8000-0000000000a1`; Barnaby `...b2` (accepted friend of Alice); Ceri `...c3` (accepted friend of Alice); Dev `...d4` (**blocked** by Alice, friendship forced to `removed`). Barnaby and Ceri are **not** friends with each other — that is the non-friend case.
 - No Swift files. No changes under `CheekyPint/`, `CheekyPintCore/`, `CheekyPintTests/`, `CheekyPintUITests/`.
 - **Deliberate divergence from the spec:** the spec says comment text "runs through the existing `ProfileTextSanitizer`", which is Swift and therefore client-side only. This plan additionally sanitises server-side via `public.strip_ugc_control_chars`, because a client-only sanitiser is bypassable by anyone calling the RPC directly. Part B2 may still run the Swift sanitiser for immediate feedback; the database is the enforcement point.
@@ -546,7 +546,7 @@ git commit -m "feat: add feed post RPCs"
 
 **Files:**
 - Create: `supabase/migrations/20260811000600_rpc_feed_social.sql`
-- Modify: `supabase/tests/rls_rpc_suite.sql` (append t33–t36)
+- Modify: `supabase/tests/rls_rpc_suite.sql` (append t35–t38)
 
 **Interfaces:**
 - Consumes: `public.posts`, `public.post_cheers`, `public.post_comments`, `public.comment_mentions`, `public.strip_ugc_control_chars(text)` from Task 1; `public.is_accepted_friend(uuid, uuid)`.
@@ -568,37 +568,37 @@ reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-00000
 do $$ declare v_post uuid; v jsonb; begin
   select post_id into v_post from public.feed_page(null, null, 20) limit 1;
   select public.toggle_post_cheers(v_post) into v;
-  if (v->>'cheered')::boolean is not true then raise exception 'FAIL t33: first toggle did not cheer'; end if;
-  if (v->>'cheers_count')::int <> 1 then raise exception 'FAIL t33: count % (want 1)', v->>'cheers_count'; end if;
+  if (v->>'cheered')::boolean is not true then raise exception 'FAIL t35: first toggle did not cheer'; end if;
+  if (v->>'cheers_count')::int <> 1 then raise exception 'FAIL t35: count % (want 1)', v->>'cheers_count'; end if;
   select public.toggle_post_cheers(v_post) into v;
-  if (v->>'cheered')::boolean is not false then raise exception 'FAIL t33: second toggle did not un-cheer'; end if;
-  if (v->>'cheers_count')::int <> 0 then raise exception 'FAIL t33: count % (want 0)', v->>'cheers_count'; end if;
-  raise notice 'PASS t33: toggle_post_cheers is idempotent per user and counts correctly';
+  if (v->>'cheered')::boolean is not false then raise exception 'FAIL t35: second toggle did not un-cheer'; end if;
+  if (v->>'cheers_count')::int <> 0 then raise exception 'FAIL t35: count % (want 0)', v->>'cheers_count'; end if;
+  raise notice 'PASS t35: toggle_post_cheers is idempotent per user and counts correctly';
 end $$;
 
 do $$ declare v_post uuid; v jsonb; v_body text; v_mentions uuid[]; begin
   select post_id into v_post from public.feed_page(null, null, 20) limit 1;
   select public.add_comment(v_post, 'nice one' || chr(8203) || '!',
                             array['00000000-0000-4000-8000-0000000000b2'::uuid]) into v;
-  if (v->>'comment_id') is null then raise exception 'FAIL t34: add_comment returned no id'; end if;
+  if (v->>'comment_id') is null then raise exception 'FAIL t36: add_comment returned no id'; end if;
   select body, mentioned_user_ids into v_body, v_mentions
     from public.post_comments_page(v_post, null, 20) limit 1;
-  if v_body is distinct from 'nice one!' then raise exception 'FAIL t34: comment body not sanitised, got %', v_body; end if;
+  if v_body is distinct from 'nice one!' then raise exception 'FAIL t36: comment body not sanitised, got %', v_body; end if;
   if v_mentions is distinct from array['00000000-0000-4000-8000-0000000000b2'::uuid] then
-    raise exception 'FAIL t34: mentions % wrong', v_mentions; end if;
-  raise notice 'PASS t34: add_comment sanitises the body and records mentions';
+    raise exception 'FAIL t36: mentions % wrong', v_mentions; end if;
+  raise notice 'PASS t36: add_comment sanitises the body and records mentions';
 end $$;
 
 -- Dev is blocked by Alice, so he is not a mentionable friend.
 do $$ declare v_post uuid; ok boolean := false; begin
   select post_id into v_post from public.feed_page(null, null, 20) limit 1;
-  if v_post is null then raise exception 'FAIL t35: no post to comment on'; end if;
+  if v_post is null then raise exception 'FAIL t37: no post to comment on'; end if;
   begin
     perform public.add_comment(v_post, 'hi', array['00000000-0000-4000-8000-0000000000d4'::uuid]);
   exception when others then ok := true;
   end;
-  if not ok then raise exception 'FAIL t35: mentioned a non-friend'; end if;
-  raise notice 'PASS t35: mentioning a non-friend is rejected';
+  if not ok then raise exception 'FAIL t37: mentioned a non-friend'; end if;
+  raise notice 'PASS t37: mentioning a non-friend is rejected';
 end $$;
 
 -- Ceri is Alice's friend but not Barnaby's, so Ceri must not reach Barnaby's post.
@@ -617,9 +617,9 @@ do $$ declare v jsonb; v_post uuid; ok_cheer boolean := false; ok_comment boolea
     perform public.add_comment(v_post, 'sneaking in', null);
   exception when others then ok_comment := true;
   end;
-  if not ok_cheer then raise exception 'FAIL t36: a non-friend cheered a post they cannot see'; end if;
-  if not ok_comment then raise exception 'FAIL t36: a non-friend commented on a post they cannot see'; end if;
-  raise notice 'PASS t36: cheers and comments require visibility of the post';
+  if not ok_cheer then raise exception 'FAIL t38: a non-friend cheered a post they cannot see'; end if;
+  if not ok_comment then raise exception 'FAIL t38: a non-friend commented on a post they cannot see'; end if;
+  raise notice 'PASS t38: cheers and comments require visibility of the post';
 end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
@@ -629,8 +629,8 @@ do $$ declare v_post uuid; v_comment uuid; v_count int; begin
   select comment_id into v_comment from public.post_comments_page(v_post, null, 20) limit 1;
   perform public.delete_comment(v_comment);
   select count(*) into v_count from public.post_comments_page(v_post, null, 20) where comment_id = v_comment;
-  if v_count <> 0 then raise exception 'FAIL t36: soft-deleted comment still visible'; end if;
-  raise notice 'PASS t36: delete_comment hides the comment';
+  if v_count <> 0 then raise exception 'FAIL t38: soft-deleted comment still visible'; end if;
+  raise notice 'PASS t38: delete_comment hides the comment';
 end $$;
 ```
 
@@ -836,7 +836,7 @@ grant execute on function public.post_comments_page(uuid, timestamptz, int) to a
 cd ~/Projects/cheekypint && ./supabase/tests/run_local_pg.sh
 ```
 
-Expected: `PASS t33` through `PASS t36`.
+Expected: `PASS t35` through `PASS t38`.
 
 - [ ] **Step 5: Commit**
 
@@ -853,7 +853,7 @@ git commit -m "feat: add feed cheers, comments and mention RPCs"
 - Create: `supabase/migrations/20260811000300_report_category_post_image.sql`
 - Create: `supabase/migrations/20260811000400_feed_reports.sql`
 - Create: `supabase/migrations/20260811000700_rpc_feed_reports.sql`
-- Modify: `supabase/tests/rls_rpc_suite.sql` (append t37–t38)
+- Modify: `supabase/tests/rls_rpc_suite.sql` (append t39–t40)
 
 **Interfaces:**
 - Consumes: `public.reports` (existing: `reporter_id`, `reported_user_id`, `category public.report_category`, `details`, `status`, plus a `report_not_self` check); `public.can_view_post(uuid, uuid)` from Task 4.
@@ -874,22 +874,22 @@ reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-00000
 do $$ declare v_post uuid; v jsonb; v_reported uuid; v_linked uuid; begin
   select post_id into v_post from public.feed_page(null, null, 20)
     where author_id = '00000000-0000-4000-8000-0000000000b2' limit 1;
-  if v_post is null then raise exception 'FAIL t37: no Barnaby post to report'; end if;
+  if v_post is null then raise exception 'FAIL t39: no Barnaby post to report'; end if;
   select public.report_post(v_post, 'inappropriate_post_image', 'not on') into v;
-  if (v->>'report_id') is null then raise exception 'FAIL t37: report_post returned no id'; end if;
-  if (v->>'status') <> 'open' then raise exception 'FAIL t37: status % (want open)', v->>'status'; end if;
+  if (v->>'report_id') is null then raise exception 'FAIL t39: report_post returned no id'; end if;
+  if (v->>'status') <> 'open' then raise exception 'FAIL t39: status % (want open)', v->>'status'; end if;
   select reported_user_id, post_id into v_reported, v_linked
     from public.reports where id = (v->>'report_id')::uuid;
   if v_reported <> '00000000-0000-4000-8000-0000000000b2' then
-    raise exception 'FAIL t37: reported_user_id % is not the post author', v_reported; end if;
-  if v_linked <> v_post then raise exception 'FAIL t37: report not linked to the post'; end if;
-  raise notice 'PASS t37: report_post files against the author and links the post';
+    raise exception 'FAIL t39: reported_user_id % is not the post author', v_reported; end if;
+  if v_linked <> v_post then raise exception 'FAIL t39: report not linked to the post'; end if;
+  raise notice 'PASS t39: report_post files against the author and links the post';
 end $$;
 
 do $$ declare v_own uuid; ok_self boolean := false; ok_hidden boolean := false; begin
   select post_id into v_own from public.feed_page(null, null, 20)
     where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
-  if v_own is null then raise exception 'FAIL t38: no own post to test with'; end if;
+  if v_own is null then raise exception 'FAIL t40: no own post to test with'; end if;
   begin
     perform public.report_post(v_own, 'inappropriate_text', null);
   exception when others then ok_self := true;
@@ -898,9 +898,9 @@ do $$ declare v_own uuid; ok_self boolean := false; ok_hidden boolean := false; 
     perform public.report_post('00000000-0000-4000-8000-00000000dead', 'inappropriate_text', null);
   exception when others then ok_hidden := true;
   end;
-  if not ok_self then raise exception 'FAIL t38: reported own post'; end if;
-  if not ok_hidden then raise exception 'FAIL t38: reported an invisible post'; end if;
-  raise notice 'PASS t38: cannot report your own post or one you cannot see';
+  if not ok_self then raise exception 'FAIL t40: reported own post'; end if;
+  if not ok_hidden then raise exception 'FAIL t40: reported an invisible post'; end if;
+  raise notice 'PASS t40: cannot report your own post or one you cannot see';
 end $$;
 ```
 
@@ -1040,7 +1040,7 @@ grant execute on function public.report_comment(uuid, public.report_category, te
 cd ~/Projects/cheekypint && ./supabase/tests/run_local_pg.sh
 ```
 
-Expected: `PASS t37` and `PASS t38`, and every earlier test still passing.
+Expected: `PASS t39` and `PASS t40`, and every earlier test still passing.
 
 Note: the t37 read of `public.reports` runs as `authenticated` and works as written — `supabase/migrations/20260101000700_rls_policies.sql:74` defines a `reports_select_own` policy, so a reporter can read the rows they filed.
 
