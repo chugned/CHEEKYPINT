@@ -20,7 +20,7 @@
 - The alcohol-free toggle must survive. `WelfareMonitor` counts *alcoholic* entries to decide when to show the welfare notice; `docs/RESPONSIBLE_DRINKING.md` treats this as a hard product requirement.
 - No new third-party dependencies. The app ships with zero.
 - Existing suites must stay green after every task: **54 `CheekyPintCore` tests** and **8 app tests**.
-- Work happens on branch `feat/instant-log-nudge`, cut from a clean tree (baseline commit `3a7c82b`). Commit at the end of each task as the steps instruct. Never commit on `master`, and never amend or rebase existing commits.
+- Work happens on branch `feat/instant-log-nudge`, cut from a clean tree (baseline commit `c18dfb1`). Commit at the end of each task as the steps instruct. Never commit on `master`, and never amend or rebase existing commits.
 
 ---
 
@@ -28,7 +28,7 @@
 
 | File | Responsibility | Change |
 |---|---|---|
-| `CheekyPint/Features/PintLogging/LogPintSheet.swift` | Beer catalog + logging sheet | Strip image layer; card grid → tap-to-log list; `Details` disclosure; per-tap idempotency |
+| `CheekyPint/Features/PintLogging/LogPintSheet.swift` | Beer catalog + logging sheet | Strip image layer; card grid → tap-to-log list; `Details` disclosure; per-beer idempotency |
 | `CheekyPintTests/BeerImageURLTests.swift` | Pinned the Commons URL format | Delete — the URLs cease to exist |
 | `FRIEND_CIRCLE_NOTES.md` | Catalog notes | Lines 42-46 describe Wikimedia loading; rewrite |
 | `supabase/migrations/20260803000000_cheers.sql` | Nudge table + RPC | Rename file and contents to `nudges` / `send_nudge` |
@@ -106,7 +106,10 @@ xcodebuild test -project CheekyPint.xcodeproj -scheme CheekyPint \
   -only-testing:CheekyPintTests/BeerCatalogTests 2>&1 | tail -20
 ```
 
-Expected: **FAIL to compile** — `BeerImageURLTests.swift` referenced `imageURL`, and after Step 3 the property is gone. (If it passes at this point, the deletion in Step 1 did not happen.)
+Expected: **PASS**, and that is correct — Step 1 already deleted the only file that referenced
+`imageURL`, so there is nothing left to fail. This step exists to confirm the new tests compile and
+run against the *unmodified* catalog before you start deleting from it: if `testCatalogStillHasEveryBeer`
+fails here, the count is wrong in the test, not in the code.
 
 - [ ] **Step 3: Remove the image layer**
 
