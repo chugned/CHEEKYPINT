@@ -1073,6 +1073,67 @@ do $$ declare v_id uuid; v_processed timestamptz; v_error text; begin
   raise notice 'PASS t48: mark_storage_gc_failed records last_error and leaves the row claimable';
 end $$;
 
+-- ============================ RETENTION ============================
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare v jsonb; v_post uuid; queued int; begin
+  select public.create_post('retention fixture', '00000000-0000-4000-8000-0000000000a1/retain.jpg', null, null) into v;
+  v_post := (v->>'post_id')::uuid;
+  perform public.delete_post(v_post);
+  reset role;
+  select count(*) into queued from public.storage_gc_queue
+   where bucket_id = 'post-images' and object_path = '00000000-0000-4000-8000-0000000000a1/retain.jpg';
+  if queued is distinct from 1 then
+    raise exception 'FAIL t49: deleting a post queued % GC entries (want 1)', queued; end if;
+  raise notice 'PASS t49: deleting a post queues its photo for storage deletion';
+end $$;
+
+reset role;
+do $$ declare purged int; still int; begin
+  -- Age the soft-deleted rows past the retention window, then purge.
+  update public.posts set deleted_at = now() - interval '40 days' where deleted_at is not null;
+  select public.purge_soft_deleted_posts(interval '30 days') into purged;
+  if purged < 1 then raise exception 'FAIL t50: purge removed % posts (want >=1)', purged; end if;
+  select count(*) into still from public.posts where deleted_at < now() - interval '30 days';
+  if still is distinct from 0 then
+    raise exception 'FAIL t50: % aged soft-deleted posts survived the purge', still; end if;
+  raise notice 'PASS t50: aged soft-deleted posts are purged';
+end $$;
+
+-- t50 (ordering): the assertions above re-purge the SAME path t49 already queued via
+-- delete_post's own enqueue, so storage_gc_queue's `unique (bucket_id, object_path)` makes
+-- purge's re-enqueue a no-op regardless of whether purge enqueues before or after deleting —
+-- deleting the row first and then re-purging still leaves `purged >= 1` and `still = 0`. Confirmed
+-- empirically: swapping purge_soft_deleted_posts to delete before enqueuing left every assertion
+-- above green. This block closes that gap by inserting a fixture directly (bypassing delete_post
+-- entirely, so its image was NEVER queued by anything else) and checking that purge itself queued
+-- it — which only holds if the enqueue happened before the row, and its image_path, were deleted.
+reset role;
+do $$ declare v_post uuid; queued int; begin
+  insert into public.posts (author_id, body, image_path, deleted_at)
+  values ('00000000-0000-4000-8000-0000000000a1', 'retention ordering fixture',
+          '00000000-0000-4000-8000-0000000000a1/retain-ordering.jpg', now() - interval '40 days')
+  returning id into v_post;
+
+  perform public.purge_soft_deleted_posts(interval '30 days');
+
+  select count(*) into queued from public.storage_gc_queue
+   where bucket_id = 'post-images'
+     and object_path = '00000000-0000-4000-8000-0000000000a1/retain-ordering.jpg';
+  if queued is distinct from 1 then
+    raise exception 'FAIL t50: purge queued % GC entries for a fixture it just deleted (want 1)', queued; end if;
+  raise notice 'PASS t50: purge_soft_deleted_posts enqueues the photo before deleting the row';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare ok boolean := false; begin
+  begin
+    perform public.purge_soft_deleted_posts(interval '30 days');
+  exception when others then ok := true;
+  end;
+  if not ok then raise exception 'FAIL t50: a client could run a retention purge'; end if;
+  raise notice 'PASS t50: retention purges are not client-callable';
+end $$;
+
 reset role;
 \echo '-------------------------------------------'
 \echo 'ALL RLS/RPC CHECKS PASSED'

@@ -9,6 +9,15 @@
       Site URL + redirect URLs (`cheekypint://auth-callback`, `https://cheekypint.app/auth-callback`)
 - [ ] Create the `avatars` storage bucket (migration does this) and confirm policies
 - [ ] Schedule `prune_rate_limit_events` (daily) and any leaderboard cache jobs if added
+- [ ] Schedule the retention jobs `docs/legal/DATA_RETENTION_POLICY.md` commits to — without
+      these running, that document is aspirational, not enforced:
+      - `prune_rate_limit_events` — daily
+      - `purge_soft_deleted_posts` — daily
+      - `purge_soft_deleted_comments` — daily
+      - `purge_soft_deleted_pint_entries` — daily
+      - `purge_resolved_reports` — weekly (defaults to an 18-month retention, the mid-point of
+        the published 12–24 month window)
+      - `storage-gc` Edge Function (drains `storage_gc_queue`) — hourly
 - [ ] Verify RLS suite against a staging DB: `supabase/tests/run_local_pg.sh`
 - [ ] Monitor `storage_gc_queue` for rows with `attempts > 3` or a non-null `last_error` — a stuck
       drain (e.g. a rotated service-role key) is otherwise invisible
