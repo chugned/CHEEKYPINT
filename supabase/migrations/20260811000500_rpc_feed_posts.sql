@@ -35,10 +35,22 @@ begin
   if p_pub_id is not null and v_label is null then
     raise exception 'A pub reference needs a place label' using errcode = '22023';
   end if;
+  -- Reject any path-traversal segment first. The ownership check below only inspects the
+  -- FIRST folder segment, so 'b2/../a1/x.jpg' would otherwise pass it (Barnaby's own uid
+  -- leads the path) while most HTTP clients/CDNs normalise the URL down to 'a1/x.jpg' before
+  -- it ever reaches storage — reaching exactly the photo the ownership check exists to block.
+  if v_image is not null and position('..' in v_image) > 0 then
+    raise exception 'Image path is invalid' using errcode = '22023';
+  end if;
   -- The bucket's own insert policy (20260811000200_feed_storage.sql) restricts uploads to the
   -- uploader's own folder; mirror that here so a caller cannot pass someone ELSE's already-
   -- uploaded (unguessable but readable-once-known) path and re-broadcast their photo.
-  if v_image is not null and (storage.foldername(v_image))[1] <> v_uid::text then
+  -- storage.foldername() drops the final (filename) segment, so a path with no '/' at all
+  -- (e.g. 'sneaky.jpg') returns an empty array and [1] is NULL. A bare "<> v_uid::text" would
+  -- make that comparison NULL, silently skipping the `if` and letting the path through — the
+  -- coalesce()+`is distinct from` form below treats a missing folder as "not mine" instead.
+  if v_image is not null
+     and coalesce((storage.foldername(v_image))[1], '') is distinct from v_uid::text then
     raise exception 'Image must be in your own folder' using errcode = '22023';
   end if;
 
@@ -138,8 +150,14 @@ as $$
      and (p.author_id = auth.uid() or public.is_accepted_friend(auth.uid(), p.author_id))
      -- Compound keyset cursor: created_at alone ties whenever a batch insert shares one
      -- transaction timestamp, which silently dropped rows under a strict "<" on created_at.
+     -- A cursor is both halves or neither; a caller that supplies p_before but omits
+     -- p_before_id has an incomplete cursor. feed_page is `language sql`, so it cannot RAISE
+     -- to reject that case (see the M5 note above on why a guard can't reliably fire here
+     -- either); coalescing the missing half to the MAXIMUM uuid instead of the minimum makes
+     -- the failure mode "may repeat a tied row across pages" rather than "silently drops it
+     -- forever" — repeats are recoverable client-side (dedupe by id), permanent loss is not.
      and (p_before is null
-          or (p.created_at, p.id) < (p_before, coalesce(p_before_id, '00000000-0000-0000-0000-000000000000'::uuid)))
+          or (p.created_at, p.id) < (p_before, coalesce(p_before_id, 'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid)))
    order by p.created_at desc, p.id desc
    limit least(greatest(coalesce(p_limit, 20), 1), 50);
 $$;

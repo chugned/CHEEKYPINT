@@ -69,8 +69,12 @@ create table storage.objects (
 );
 alter table storage.objects enable row level security;
 
+-- Matches production Supabase storage.foldername(): the FOLDER path only, i.e. every
+-- component except the trailing filename. 'a1/x.jpg' -> {a1}; a bare 'x.jpg' with no '/' at
+-- all -> {} (empty array, so [1] is NULL) — NOT {x.jpg}. Getting this wrong here would make
+-- the RLS/RPC suite validate folder-ownership guards against the wrong semantics.
 create or replace function storage.foldername(name text) returns text[] language sql immutable as $$
-  select string_to_array(name, '/');
+  select (string_to_array(name, '/'))[1 : array_length(string_to_array(name, '/'), 1) - 1];
 $$;
 
 grant usage on schema storage to anon, authenticated, service_role;

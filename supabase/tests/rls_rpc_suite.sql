@@ -351,6 +351,91 @@ do $$ declare ok boolean := false; v_sqlstate text; begin
   raise notice 'PASS t34: create_post rejects an image path outside the caller''s own folder';
 end $$;
 
+-- storage.foldername() drops the trailing filename segment (production semantics — see the
+-- shim comment in _shim_bootstrap.sql). A path with no '/' at all therefore yields an EMPTY
+-- array, so [1] is NULL; a bare "<> v_uid::text" comparison against NULL is itself NULL, which
+-- skips the `if` and silently accepts. This is the gate for that NULL-unsafe class of bug.
+do $$ declare ok boolean := false; v_sqlstate text; begin
+  begin
+    perform public.create_post('no folder at all', 'sneaky.jpg', null, null);
+  exception when others then
+    ok := true; v_sqlstate := sqlstate;
+  end;
+  if not ok then raise exception 'FAIL t34a: create_post accepted an image path with no folder segment'; end if;
+  if v_sqlstate is distinct from '22023' then
+    raise exception 'FAIL t34a: wrong errcode % for folderless image (want 22023)', v_sqlstate;
+  end if;
+  raise notice 'PASS t34a: create_post rejects an image path with no folder segment (NULL-safe ownership check)';
+end $$;
+
+-- The ownership check only inspects the FIRST folder segment; 'b2/../a1/x.jpg' leads with
+-- Barnaby's own uid so that check alone would accept it, while most HTTP clients/CDNs
+-- normalise the URL down to 'a1/x.jpg' before it reaches storage — reaching exactly the photo
+-- the ownership check exists to block. A dedicated '..' rejection closes that gap.
+do $$ declare ok boolean := false; v_sqlstate text; begin
+  begin
+    perform public.create_post('traversal attempt',
+      '00000000-0000-4000-8000-0000000000b2/../00000000-0000-4000-8000-0000000000a1/x.jpg',
+      null, null);
+  exception when others then
+    ok := true; v_sqlstate := sqlstate;
+  end;
+  if not ok then raise exception 'FAIL t34b: create_post accepted an image path containing a .. segment'; end if;
+  if v_sqlstate is distinct from '22023' then
+    raise exception 'FAIL t34b: wrong errcode % for path-traversal image (want 22023)', v_sqlstate;
+  end if;
+  raise notice 'PASS t34b: create_post rejects an image path containing a .. traversal segment';
+end $$;
+
+-- ============================ FEED: pagination cursor coverage ============================
+-- No earlier test ever passed a non-null cursor into feed_page, so the compound-keyset logic
+-- (I3/N2) had zero coverage. Ceri has created no posts yet, so her feed is a clean 3-row set.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000c3';
+do $$ declare v1 jsonb; v2 jsonb; v3 jsonb; begin
+  select public.create_post('Ceri post 1', null, null, null) into v1;
+  select public.create_post('Ceri post 2', null, null, null) into v2;
+  select public.create_post('Ceri post 3', null, null, null) into v3;
+  if (v1->>'post_id') is null or (v2->>'post_id') is null or (v3->>'post_id') is null then
+    raise exception 'FAIL t34c: could not seed three posts for pagination coverage';
+  end if;
+  raise notice 'PASS t34c: seeded three posts for pagination coverage';
+end $$;
+
+do $$
+declare
+  v_page1_ids uuid[];
+  v_cursor_created timestamptz;
+  v_cursor_id uuid;
+  v_page2_ids uuid[];
+begin
+  select array_agg(post_id order by created_at desc, post_id desc) into v_page1_ids
+    from public.feed_page(null, null, 2)
+   where author_id = '00000000-0000-4000-8000-0000000000c3';
+  if coalesce(array_length(v_page1_ids, 1), 0) <> 2 then
+    raise exception 'FAIL t34c: page 1 returned % rows (want 2)', coalesce(array_length(v_page1_ids, 1), 0);
+  end if;
+
+  -- The cursor is the LAST row shown on page 1 (in display order) — i.e. the older of the two.
+  select created_at, post_id into v_cursor_created, v_cursor_id
+    from public.feed_page(null, null, 2)
+   where author_id = '00000000-0000-4000-8000-0000000000c3'
+   order by created_at asc, post_id asc
+   limit 1;
+
+  select array_agg(post_id order by created_at desc, post_id desc) into v_page2_ids
+    from public.feed_page(v_cursor_created, v_cursor_id, 20)
+   where author_id = '00000000-0000-4000-8000-0000000000c3';
+
+  if coalesce(array_length(v_page2_ids, 1), 0) <> 1 then
+    raise exception 'FAIL t34c: page 2 returned % rows (want 1)', coalesce(array_length(v_page2_ids, 1), 0);
+  end if;
+  if v_page2_ids[1] = any(v_page1_ids) then
+    raise exception 'FAIL t34c: page 2 repeated a page 1 row';
+  end if;
+
+  raise notice 'PASS t34c: keyset cursor advances to page 2 without repeating page 1''s rows';
+end $$;
+
 reset role;
 \echo '-------------------------------------------'
 \echo 'ALL RLS/RPC CHECKS PASSED'
