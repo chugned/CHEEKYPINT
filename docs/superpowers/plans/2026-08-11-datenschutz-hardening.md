@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Tasks:** 5. Every SQL task ends with `./supabase/tests/run_local_pg.sh` green.
+**Tasks:** 6. Every SQL task ends with `./supabase/tests/run_local_pg.sh` green.
 
 **Goal:** Bring the CheekyPint backend in line with DSGVO/Austrian DSG obligations that are engineering work rather than paperwork: make post photos genuinely access-controlled, make the published retention policy actually happen, and give users a way to obtain their data.
 
@@ -567,6 +567,113 @@ Add both to `docs/RELEASE_CHECKLIST.md` under Legal, alongside the existing coun
 ```bash
 git add docs/DPIA.md docs/RECORDS_OF_PROCESSING.md docs/RELEASE_CHECKLIST.md
 git commit -m "docs: add DPIA and Article 30 records of processing"
+```
+
+---
+
+### Task 6: Close the friend-graph oracle
+
+Found during Task 1's review. `supabase/migrations/20260101000900_grants.sql` runs
+`grant execute on all functions in schema public to authenticated` **after**
+`20260101000600_security_helpers.sql` created its helpers, and unlike `can_view_post` they were
+never individually revoked. So any authenticated user can call
+`select public.is_accepted_friend('<any-uid>', '<any-other-uid>')` directly and learn whether two
+arbitrary people are friends — a direct read of other people's social graph, with no post, photo or
+comment involved. `is_blocked` is worse: it discloses that a specific pair has blocked each other.
+
+This is a DSGVO-relevant confidentiality defect, pre-existing and unrelated to the feed.
+
+**Verified before writing this task:** no RLS policy calls these helpers directly — the only
+policy-side use is inside `public.can_read_post_image`, which is `security definer` and therefore
+runs as the owner. So revoking client EXECUTE breaks nothing.
+
+**Files:**
+- Create: `supabase/migrations/20260812000600_revoke_helper_oracles.sql`
+- Modify: `supabase/tests/rls_rpc_suite.sql` (append t51)
+
+**Interfaces:** no new objects. Removes `authenticated` EXECUTE from four helpers.
+
+- [ ] **Step 1: Write the failing test**
+
+```sql
+-- ============================ HELPER ORACLES ============================
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000c3';
+do $$
+declare ok_friend boolean := false; ok_blocked boolean := false; ok_profile boolean := false;
+begin
+  -- Ceri must not be able to interrogate other people's relationships directly.
+  begin
+    perform public.is_accepted_friend(
+      '00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000b2');
+  exception when others then ok_friend := true;
+  end;
+  begin
+    perform public.is_blocked(
+      '00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000d4');
+  exception when others then ok_blocked := true;
+  end;
+  begin
+    perform public.can_view_profile(
+      '00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000b2');
+  exception when others then ok_profile := true;
+  end;
+  if not ok_friend then raise exception 'FAIL t51: is_accepted_friend is a client-callable oracle'; end if;
+  if not ok_blocked then raise exception 'FAIL t51: is_blocked is a client-callable oracle'; end if;
+  if not ok_profile then raise exception 'FAIL t51: can_view_profile is a client-callable oracle'; end if;
+  raise notice 'PASS t51: relationship helpers are not callable by clients';
+end $$;
+
+-- ...and the feed still works, i.e. the revoke did not break the definer functions that use them.
+do $$ declare visible int; begin
+  select count(*) into visible from public.feed_page(null, null, 20);
+  if visible < 1 then raise exception 'FAIL t51: feed_page returned % rows after the revoke', visible; end if;
+  raise notice 'PASS t51: feed_page still works — nested definer calls are unaffected';
+end $$;
+```
+
+- [ ] **Step 2: Run the suite to verify it fails**
+
+```bash
+cd ~/Projects/cheekypint && ./supabase/tests/run_local_pg.sh
+```
+
+Expected: FAIL at `FAIL t51: is_accepted_friend is a client-callable oracle` — the blanket grant is
+still in force.
+
+- [ ] **Step 3: Create the migration**
+
+```sql
+-- CheekyPint: relationship helpers must not be client-callable.
+--
+-- 20260101000900_grants.sql runs `grant execute on all functions in schema public to
+-- authenticated` after 20260101000600_security_helpers.sql created these, and unlike can_view_post
+-- they were never individually revoked. That left any authenticated user able to ask
+-- `is_accepted_friend(<a>, <b>)` about arbitrary people — a direct read of someone else's social
+-- graph — and `is_blocked(<a>, <b>)`, which discloses that a specific pair blocked each other.
+--
+-- Safe to revoke: no RLS policy calls these. The only policy-side use is inside
+-- public.can_read_post_image, which is security definer and runs as the owner, as do every RPC and
+-- helper that composes them.
+revoke execute on function public.is_accepted_friend(uuid, uuid) from authenticated;
+revoke execute on function public.is_blocked(uuid, uuid) from authenticated;
+revoke execute on function public.can_view_profile(uuid, uuid) from authenticated;
+revoke execute on function public.shares_active_session(uuid, uuid) from authenticated;
+```
+
+Read `20260101000600_security_helpers.sql` first and confirm those four signatures character for
+character; if any differs, use the real one and say so in your report. If any **other** function in
+that file is also client-granted and only ever used internally, add it and justify it.
+
+- [ ] **Step 4: Run the suite to verify it passes**
+
+Expected: both `PASS t51` notices, and every earlier block still green — that second assertion is
+the important one, since it proves the revoke did not break the definer functions built on these.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add supabase/migrations/20260812000600_revoke_helper_oracles.sql supabase/tests/rls_rpc_suite.sql
+git commit -m "fix: stop clients interrogating other users' relationships directly"
 ```
 
 ---
