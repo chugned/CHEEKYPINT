@@ -232,6 +232,74 @@ do $$ declare v text; begin
   raise notice 'PASS t27: control, zero-width, bidi and isolate characters are stripped';
 end $$;
 
+-- ============================ FEED: posts ============================
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+
+do $$ declare v jsonb; v_count int; begin
+  select public.create_post('First pint of the trip', null, 'Prague', null) into v;
+  if (v->>'post_id') is null then raise exception 'FAIL t28: create_post returned no post_id'; end if;
+  select count(*) into v_count from public.feed_page(null, 20) where author_id = '00000000-0000-4000-8000-0000000000a1';
+  if v_count <> 1 then raise exception 'FAIL t28: author sees % of own posts (want 1)', v_count; end if;
+  raise notice 'PASS t28: create_post stores a post the author can read back';
+end $$;
+
+do $$ begin
+  begin
+    perform public.create_post(null, null, 'Prague', null);
+    raise exception 'FAIL t29: create_post accepted a post with neither body nor image';
+  exception when others then null;
+  end;
+  begin
+    perform public.create_post('x', null, null, '00000000-0000-4000-8000-00000000e001');
+    raise exception 'FAIL t29: create_post accepted a pub_id with no place_label';
+  exception when others then null;
+  end;
+  raise notice 'PASS t29: create_post rejects empty posts and unlabelled pub references';
+end $$;
+
+do $$ declare v text; begin
+  perform public.create_post('clean' || chr(8203) || chr(9) || 'text', null, null, null);
+  select body into v from public.feed_page(null, 20) order by created_at desc limit 1;
+  if v <> 'cleantext' then raise exception 'FAIL t30: post body not sanitised, got %', v; end if;
+  raise notice 'PASS t30: create_post strips control and zero-width characters from the body';
+end $$;
+
+-- Barnaby is an accepted friend of Alice; Ceri is a friend of Alice but NOT of Barnaby.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
+do $$ declare v_count int; begin
+  select count(*) into v_count from public.feed_page(null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1';
+  if v_count <> 2 then raise exception 'FAIL t31: friend sees % of Alice posts (want 2)', v_count; end if;
+  raise notice 'PASS t31: an accepted friend sees the posts';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000d4';
+do $$ declare v_count int; begin
+  select count(*) into v_count from public.feed_page(null, 20);
+  if v_count <> 0 then raise exception 'FAIL t31: blocked user sees % posts (want 0)', v_count; end if;
+  raise notice 'PASS t31: a blocked user sees nothing';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare v_id uuid; v_count int; begin
+  select post_id into v_id from public.feed_page(null, 20) order by created_at desc limit 1;
+  perform public.delete_post(v_id);
+  select count(*) into v_count from public.feed_page(null, 20) where post_id = v_id;
+  if v_count <> 0 then raise exception 'FAIL t32: soft-deleted post still visible'; end if;
+  raise notice 'PASS t32: delete_post hides the post from every read path';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
+do $$ declare v_id uuid; begin
+  select post_id into v_id from public.feed_page(null, 20) limit 1;
+  begin
+    perform public.delete_post(v_id);
+    raise exception 'FAIL t32: a non-author deleted someone else''s post';
+  exception when others then null;
+  end;
+  raise notice 'PASS t32: only the author can delete a post';
+end $$;
+
 reset role;
 \echo '-------------------------------------------'
 \echo 'ALL RLS/RPC CHECKS PASSED'
