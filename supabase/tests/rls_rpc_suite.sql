@@ -665,31 +665,124 @@ do $$ declare v_post uuid; v jsonb; v_reported uuid; v_linked uuid; begin
   if v_post is null then raise exception 'FAIL t41: no Barnaby post to report'; end if;
   select public.report_post(v_post, 'inappropriate_post_image', 'not on') into v;
   if (v->>'report_id') is null then raise exception 'FAIL t41: report_post returned no id'; end if;
-  if (v->>'status') <> 'open' then raise exception 'FAIL t41: status % (want open)', v->>'status'; end if;
+  if (v->>'status') is distinct from 'open' then raise exception 'FAIL t41: status % (want open)', v->>'status'; end if;
   select reported_user_id, post_id into v_reported, v_linked
     from public.reports where id = (v->>'report_id')::uuid;
-  if v_reported <> '00000000-0000-4000-8000-0000000000b2' then
+  if v_reported is distinct from '00000000-0000-4000-8000-0000000000b2'::uuid then
     raise exception 'FAIL t41: reported_user_id % is not the post author', v_reported; end if;
-  if v_linked <> v_post then raise exception 'FAIL t41: report not linked to the post'; end if;
+  if v_linked is distinct from v_post then raise exception 'FAIL t41: report not linked to the post'; end if;
   raise notice 'PASS t41: report_post files against the author and links the post';
 end $$;
 
-do $$ declare v_own uuid; ok_self boolean := false; ok_hidden boolean := false; begin
-  select post_id into v_own from public.feed_page(null, null, 20)
+-- Rewritten per fix-round-1 review: the original ok_self/ok_hidden booleans (bare
+-- `exception when others`) passed vacuously even with either app-level guard in report_post
+-- deleted outright. Self-reporting is ALSO blocked by the table's own `report_not_self` CHECK
+-- (SQLSTATE 23514) once reporter_id = reported_user_id, independent of report_post's
+-- `v_author = v_uid` line. Reporting a nonexistent post id also fails independently, on a
+-- NOT NULL violation (23502) once v_author resolves to NULL. Both are "some exception", so a
+-- deleted app guard was indistinguishable from a working one. Asserting the exact SQLSTATE the
+-- APP GUARD itself raises (22023, P0002) closes both holes, and using a post that EXISTS but is
+-- INVISIBLE to the caller (rather than a nonexistent id) means NOT NULL can never stand in for
+-- the can_view_post gate.
+do $$ declare v_own uuid; v_other uuid; ss_self text; ss_hidden text; begin
+  select post_id into v_own from public.feed_page(null,null,20)
     where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
-  if v_own is null then raise exception 'FAIL t42: no own post to test with'; end if;
-  begin
-    perform public.report_post(v_own, 'inappropriate_text', null);
-  exception when others then ok_self := true;
-  end;
-  begin
-    perform public.report_post('00000000-0000-4000-8000-00000000dead', 'inappropriate_text', null);
-  exception when others then ok_hidden := true;
-  end;
-  if not ok_self then raise exception 'FAIL t42: reported own post'; end if;
-  if not ok_hidden then raise exception 'FAIL t42: reported an invisible post'; end if;
-  raise notice 'PASS t42: cannot report your own post or one you cannot see';
+  if v_own is null then raise exception 'FAIL t42: no own post'; end if;
+  -- Capture Barnaby's post while still acting as Alice — Ceri cannot see it, which is the point.
+  select post_id into v_other from public.feed_page(null,null,20)
+    where author_id = '00000000-0000-4000-8000-0000000000b2' limit 1;
+  if v_other is null then raise exception 'FAIL t42: no Barnaby post'; end if;
+
+  begin perform public.report_post(v_own, 'inappropriate_text', null);
+  exception when others then ss_self := sqlstate; end;
+  if ss_self is distinct from '22023' then
+    raise exception 'FAIL t42: self-report rejected with % (want 22023 from the app guard, not the table CHECK)', ss_self; end if;
+
+  perform set_config('app.uid','00000000-0000-4000-8000-0000000000c3', false);
+  begin perform public.report_post(v_other, 'inappropriate_text', null);
+  exception when others then ss_hidden := sqlstate; end;
+  if ss_hidden is distinct from 'P0002' then
+    raise exception 'FAIL t42: invisible-post report rejected with % (want P0002)', ss_hidden; end if;
+  raise notice 'PASS t42: self-reports and reports of invisible posts are rejected by the app guards';
 end $$;
+
+-- I4: report_comment had zero coverage. Ceri comments on Alice's post so the comment's author
+-- (Ceri) is provably DIFFERENT from the post's author (Alice) — if report_comment's author
+-- resolution regressed to filing against the POST's author instead of the COMMENT's, v_reported
+-- below would read back as Alice instead of Ceri and this assertion would catch it.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare v_post uuid; v_comment uuid; v jsonb; v_reported uuid; v_linked uuid; begin
+  select public.create_post('t43 setup: Alice post for report_comment coverage', null, null, null) into v;
+  v_post := (v->>'post_id')::uuid;
+
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000c3', false);
+  select public.add_comment(v_post, 'Ceri comment to be reported', null) into v;
+  v_comment := (v->>'comment_id')::uuid;
+
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000a1', false);
+  select public.report_comment(v_comment, 'inappropriate_text', 'rude') into v;
+  if (v->>'report_id') is null then raise exception 'FAIL t43: report_comment returned no id'; end if;
+  if (v->>'status') is distinct from 'open' then raise exception 'FAIL t43: status % (want open)', v->>'status'; end if;
+
+  select reported_user_id, comment_id into v_reported, v_linked
+    from public.reports where id = (v->>'report_id')::uuid;
+  if v_reported is distinct from '00000000-0000-4000-8000-0000000000c3'::uuid then
+    raise exception 'FAIL t43: reported_user_id % is not the COMMENT author (Ceri)', v_reported; end if;
+  if v_linked is distinct from v_comment then raise exception 'FAIL t43: report not linked to the comment'; end if;
+  raise notice 'PASS t43: report_comment files against the comment author (not the post author) and links the comment';
+end $$;
+
+-- t43b: self-reporting your own comment is refused, on the app guard's own errcode.
+do $$ declare v_post uuid; v_comment uuid; v jsonb; ss text; begin
+  select public.create_post('t43b setup: Alice post for self-report-comment check', null, null, null) into v;
+  v_post := (v->>'post_id')::uuid;
+  select public.add_comment(v_post, 'Alice commenting on her own post', null) into v;
+  v_comment := (v->>'comment_id')::uuid;
+
+  begin perform public.report_comment(v_comment, 'inappropriate_text', null);
+  exception when others then ss := sqlstate; end;
+  if ss is distinct from '22023' then
+    raise exception 'FAIL t43b: self-report-comment rejected with % (want 22023)', ss; end if;
+  raise notice 'PASS t43b: cannot report your own comment';
+end $$;
+
+-- t43c: a soft-deleted comment cannot be reported — report_comment's query filters
+-- `deleted_at is null`, so a deleted comment resolves v_author to NULL, the same failure mode a
+-- nonexistent id would hit, but reached via an actually-existing row.
+do $$ declare v_post uuid; v_comment uuid; v jsonb; ss text; begin
+  select public.create_post('t43c setup: Alice post for deleted-comment report check', null, null, null) into v;
+  v_post := (v->>'post_id')::uuid;
+  select public.add_comment(v_post, 'will be deleted', null) into v;
+  v_comment := (v->>'comment_id')::uuid;
+  perform public.delete_comment(v_comment);
+
+  begin perform public.report_comment(v_comment, 'inappropriate_text', null);
+  exception when others then ss := sqlstate; end;
+  if ss is distinct from 'P0002' then
+    raise exception 'FAIL t43c: soft-deleted comment report rejected with % (want P0002)', ss; end if;
+  raise notice 'PASS t43c: cannot report a soft-deleted comment';
+end $$;
+
+-- t43d: a comment on a post the caller cannot see is refused, even holding the comment id
+-- directly — mirrors t42's "invisible post" case, but for comments. Barnaby comments on his own
+-- post; Ceri is not Barnaby's friend and nobody is blocked, so this pins the friends-only gate,
+-- not a block check.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
+do $$ declare v_post uuid; v_comment uuid; v jsonb; ss text; begin
+  select public.create_post('t43d setup: Barnaby post for invisible-comment report check', null, null, null) into v;
+  v_post := (v->>'post_id')::uuid;
+  select public.add_comment(v_post, 'Barnaby comment Ceri cannot see', null) into v;
+  v_comment := (v->>'comment_id')::uuid;
+
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000c3', false);
+  begin perform public.report_comment(v_comment, 'inappropriate_text', null);
+  exception when others then ss := sqlstate; end;
+  if ss is distinct from 'P0002' then
+    raise exception 'FAIL t43d: invisible-post comment report rejected with % (want P0002)', ss; end if;
+  raise notice 'PASS t43d: cannot report a comment on a post you cannot see';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 
 reset role;
 \echo '-------------------------------------------'
