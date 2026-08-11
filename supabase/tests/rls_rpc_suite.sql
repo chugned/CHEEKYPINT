@@ -447,10 +447,10 @@ do $$ declare v_post uuid; v jsonb; begin
   if v_post is null then raise exception 'FAIL: no Alice post available'; end if;
   select public.toggle_post_cheers(v_post) into v;
   if (v->>'cheered')::boolean is not true then raise exception 'FAIL t35: first toggle did not cheer'; end if;
-  if (v->>'cheers_count')::int <> 1 then raise exception 'FAIL t35: count % (want 1)', v->>'cheers_count'; end if;
+  if (v->>'cheers_count')::int is distinct from 1 then raise exception 'FAIL t35: count % (want 1)', v->>'cheers_count'; end if;
   select public.toggle_post_cheers(v_post) into v;
   if (v->>'cheered')::boolean is not false then raise exception 'FAIL t35: second toggle did not un-cheer'; end if;
-  if (v->>'cheers_count')::int <> 0 then raise exception 'FAIL t35: count % (want 0)', v->>'cheers_count'; end if;
+  if (v->>'cheers_count')::int is distinct from 0 then raise exception 'FAIL t35: count % (want 0)', v->>'cheers_count'; end if;
   raise notice 'PASS t35: toggle_post_cheers is idempotent per user and counts correctly';
 end $$;
 
@@ -464,11 +464,43 @@ do $$ declare v_post uuid; v jsonb; v_body text; v_mentions uuid[]; begin
                             array['00000000-0000-4000-8000-0000000000b2'::uuid]) into v;
   if (v->>'comment_id') is null then raise exception 'FAIL t36: add_comment returned no id'; end if;
   select body, mentioned_user_ids into v_body, v_mentions
-    from public.post_comments_page(v_post, null, 20) limit 1;
+    from public.post_comments_page(v_post, null, null, 20) limit 1;
   if v_body is distinct from 'nice one!' then raise exception 'FAIL t36: comment body not sanitised, got %', v_body; end if;
   if v_mentions is distinct from array['00000000-0000-4000-8000-0000000000b2'::uuid] then
     raise exception 'FAIL t36: mentions % wrong', v_mentions; end if;
   raise notice 'PASS t36: add_comment sanitises the body and records mentions';
+end $$;
+
+-- C1 regression: post_comments_page's avatar gate is about the VIEWER's relationship to the
+-- COMMENTER, not to the post author. Barnaby comments on Alice's post (visible to him as her
+-- friend); Ceri can also see the thread (she is Alice's friend too) but is a stranger to
+-- Barnaby, so she must not receive his avatar even though avatar_visibility defaults to
+-- 'friends'. Alice, who IS Barnaby's friend, must still receive it — proving the fix does not
+-- just blank the field for everyone.
+do $$ declare v_post uuid; v_avatar_ceri text; v_avatar_alice text; begin
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
+  if v_post is null then raise exception 'FAIL t36a: no Alice post available'; end if;
+
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000b2', false);
+  update public.profiles set avatar_path = 'b2/barnaby.jpg' where id = auth.uid();
+  perform public.add_comment(v_post, 'hi from Barnaby', null);
+
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000c3', false);
+  select avatar_path into v_avatar_ceri from public.post_comments_page(v_post, null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000b2';
+  if v_avatar_ceri is not null then
+    raise exception 'FAIL t36a: Ceri (a stranger to Barnaby) received Barnaby''s avatar_path %', v_avatar_ceri;
+  end if;
+
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000a1', false);
+  select avatar_path into v_avatar_alice from public.post_comments_page(v_post, null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000b2';
+  if v_avatar_alice is distinct from 'b2/barnaby.jpg' then
+    raise exception 'FAIL t36a: Alice (Barnaby''s friend) did not receive his avatar_path, got %', v_avatar_alice;
+  end if;
+
+  raise notice 'PASS t36a: comment avatar_path is gated on the VIEWER being a friend of the commenter';
 end $$;
 
 -- Dev is blocked by Alice, so he is not a mentionable friend.
@@ -487,11 +519,56 @@ do $$ declare v_post uuid; ok boolean := false; begin
   raise notice 'PASS t37: mentioning a non-friend is rejected';
 end $$;
 
--- Ceri is Alice's friend but not Barnaby's, so Ceri must not reach Barnaby's post.
+-- Barnaby's identity for the remaining feed-social tests below: he creates his own post, and is
+-- the friend recruited to isolate the mention checks from Alice's own social graph.
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
-do $$ declare v jsonb; v_post uuid; ok_cheer boolean := false; ok_comment boolean := false; begin
+
+-- I4 regression: a mention target must ALSO be able to see the post, not merely be a friend of
+-- the commenter. t37 alone cannot prove this half of the check, because Dev fails BOTH the
+-- friendship test and the visibility test there. Make Barnaby and Dev friends first, so the
+-- ONLY thing left that can reject this comment is Dev's inability to see ALICE's post (she
+-- blocked him) — isolating the can_view_post half of the mention check from the
+-- is_accepted_friend half.
+do $$ declare v_post uuid; v_req jsonb; ok boolean := false; begin
+  select public.send_friend_request('00000000-0000-4000-8000-0000000000d4') into v_req;
+
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000d4', false);
+  perform public.respond_to_friend_request((v_req->>'friendship_id')::uuid, true);
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000b2', false);
+
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
+  if v_post is null then raise exception 'FAIL t37b: no Alice post available'; end if;
+
+  begin
+    perform public.add_comment(v_post, 'hi', array['00000000-0000-4000-8000-0000000000d4'::uuid]);
+  exception when others then ok := true;
+  end;
+  if not ok then
+    raise exception 'FAIL t37b: mentioned a friend who cannot see the post (blocked by its author)';
+  end if;
+  raise notice 'PASS t37b: mention target must also be able to view the post, not merely be a friend of the commenter';
+end $$;
+
+-- Ceri is Alice's friend but not Barnaby's, so Ceri must not reach Barnaby's post.
+do $$ declare v jsonb; v_post uuid; ok_cheer boolean := false; ok_comment boolean := false; ok_mention boolean := false; begin
   select public.create_post('Barnaby was here', null, null, null) into v;
   v_post := (v->>'post_id')::uuid;
+
+  -- I7 regression: pin the friends-only mention rule in isolation from post-visibility/blocking.
+  -- Barnaby's own post is visible to him (he is the author), and Ceri is a non-friend who is NOT
+  -- blocked by anybody, so this rejection can only be explained by the friendship check — t37
+  -- alone leaves a guard weakened to "not is_blocked" undetected, since Dev fails both checks
+  -- there.
+  begin
+    perform public.add_comment(v_post, 'hey', array['00000000-0000-4000-8000-0000000000c3'::uuid]);
+  exception when others then ok_mention := true;
+  end;
+  if not ok_mention then
+    raise exception 'FAIL t37c: mentioning a non-friend, non-blocked user was accepted';
+  end if;
+  raise notice 'PASS t37c: mentioning a non-friend (unblocked) is rejected on friendship grounds alone';
+
   -- Ceri is Alice's friend but not Barnaby's, and nobody has blocked anybody here: this is the
   -- non-friend, non-blocked case that distinguishes friends-only from merely not-blocked.
   perform set_config('app.uid', '00000000-0000-4000-8000-0000000000c3', false);
@@ -508,15 +585,64 @@ do $$ declare v jsonb; v_post uuid; ok_cheer boolean := false; ok_comment boolea
   raise notice 'PASS t38: cheers and comments require visibility of the post';
 end $$;
 
+-- I6 regression: post_comments_page's own can_view_post guard had no test — removing it from
+-- the query left the whole suite green while any authenticated caller holding a post id could
+-- read an entire friends-only thread. Ceri is Alice's friend but not Barnaby's, and nobody is
+-- blocked here, so this pins the friends-only read guard specifically (not a block check).
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
+do $$ declare v_post uuid; v jsonb; v_count int; begin
+  select public.create_post('Barnaby thread for the read-guard check', null, null, null) into v;
+  v_post := (v->>'post_id')::uuid;
+
+  -- Ensure the thread is non-empty, so a zero-row result below can only be explained by the
+  -- visibility guard, not by there being nothing to read.
+  perform public.add_comment(v_post, 'a comment that exists', null);
+
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000c3', false);
+  select count(*) into v_count from public.post_comments_page(v_post, null, null, 20);
+  if v_count <> 0 then
+    raise exception 'FAIL t40: a non-friend read % comments on a post they cannot see', v_count;
+  end if;
+  raise notice 'PASS t40: post_comments_page hides comments from non-friends of the post''s author';
+end $$;
+
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 do $$ declare v_post uuid; v_comment uuid; v_count int; begin
   select post_id into v_post from public.feed_page(null, null, 20)
     where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
-  select comment_id into v_comment from public.post_comments_page(v_post, null, 20) limit 1;
+  -- Filter by author: several other identities have now also commented on this post (t36a,
+  -- t37b), so an unfiltered limit 1 is not guaranteed to be a comment Alice herself owns, and
+  -- delete_comment's ownership guard would then correctly reject Alice's own delete attempt.
+  select comment_id into v_comment from public.post_comments_page(v_post, null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
   perform public.delete_comment(v_comment);
-  select count(*) into v_count from public.post_comments_page(v_post, null, 20) where comment_id = v_comment;
+  select count(*) into v_count from public.post_comments_page(v_post, null, null, 20) where comment_id = v_comment;
   if v_count <> 0 then raise exception 'FAIL t38: soft-deleted comment still visible'; end if;
   raise notice 'PASS t38: delete_comment hides the comment';
+end $$;
+
+-- I5 regression: delete_comment's ownership guard (author_id = v_uid) previously had no test —
+-- removing that clause left the whole suite green. Barnaby is a friend who can see this comment
+-- but did not write it, so he must not be able to delete it, and it must still be there after.
+do $$ declare v_post uuid; v_comment uuid; v jsonb; ok boolean := false; v_count int; begin
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
+  select public.add_comment(v_post, 'do not delete me', null) into v;
+  v_comment := (v->>'comment_id')::uuid;
+
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000b2', false);
+  begin
+    perform public.delete_comment(v_comment);
+  exception when others then ok := true;
+  end;
+  if not ok then raise exception 'FAIL t39: a non-author deleted someone else''s comment'; end if;
+
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000a1', false);
+  select count(*) into v_count from public.post_comments_page(v_post, null, null, 20)
+    where comment_id = v_comment;
+  if v_count <> 1 then raise exception 'FAIL t39: comment wrongly removed after rejected delete attempt'; end if;
+
+  raise notice 'PASS t39: only the comment''s author can delete it';
 end $$;
 
 reset role;

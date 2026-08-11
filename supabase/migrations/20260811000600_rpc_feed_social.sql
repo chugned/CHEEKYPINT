@@ -34,14 +34,26 @@ begin
     raise exception 'Post not available' using errcode = 'P0002';
   end if;
 
-  perform public.enforce_rate_limit('post_cheers', 200, interval '1 hour');
+  perform public.enforce_rate_limit('cheers_toggle', 120, interval '1 hour');
 
-  delete from public.post_cheers where post_id = p_post_id and user_id = v_uid;
-  if found then
-    v_cheered := false;
-  else
-    insert into public.post_cheers (post_id, user_id) values (p_post_id, v_uid);
-    v_cheered := true;
+  -- The INSERT is the arbiter, not a preceding DELETE-then-branch: two concurrent un-cheer taps
+  -- under READ COMMITTED could otherwise both find nothing to delete and both insert, leaving a
+  -- cheered row after two "uncheer" taps; two concurrent cheer taps could both attempt the
+  -- insert and one would die on the post_cheers_pkey unique violation with a raw constraint-name
+  -- error instead of a handled outcome. ON CONFLICT DO NOTHING makes the insert either succeed
+  -- (this call turned it on) or no-op (someone already had it on, so this call turns it off) —
+  -- every interleaving converges instead of erroring, which matters because the client does an
+  -- optimistic toggle and rapid double-taps are the expected case, not an edge case.
+  with ins as (
+    insert into public.post_cheers (post_id, user_id)
+    values (p_post_id, v_uid)
+    on conflict (post_id, user_id) do nothing
+    returning 1
+  )
+  select exists (select 1 from ins) into v_cheered;
+
+  if not v_cheered then
+    delete from public.post_cheers where post_id = p_post_id and user_id = v_uid;
   end if;
 
   select count(*)::int into v_count from public.post_cheers where post_id = p_post_id;
@@ -78,9 +90,15 @@ begin
   end if;
 
   -- You can only mention people you are actually friends with; this closes the obvious
-  -- harassment vector of tagging strangers into a thread.
+  -- harassment vector of tagging strangers into a thread. A friend of the COMMENTER is not
+  -- automatically able to see this POST — e.g. the post author blocked them — so the mention
+  -- target must also independently pass can_view_post, or the mention would tie a person into
+  -- a thread they have no visibility into (and no way to know they were named in). `is distinct
+  -- from` (not `<>`) keeps a NULL array element from silently skipping this check.
   foreach v_mention in array coalesce(p_mentions, array[]::uuid[]) loop
-    if v_mention <> v_uid and not public.is_accepted_friend(v_uid, v_mention) then
+    if v_mention is distinct from v_uid
+       and (not public.is_accepted_friend(v_uid, v_mention)
+            or not public.can_view_post(v_mention, p_post_id)) then
       raise exception 'Can only mention friends' using errcode = 'P0002';
     end if;
   end loop;
@@ -92,7 +110,7 @@ begin
   insert into public.comment_mentions (comment_id, mentioned_user_id)
   select v_row.id, m
     from unnest(coalesce(p_mentions, array[]::uuid[])) as m
-   where m <> v_uid
+   where m is distinct from v_uid
   on conflict do nothing;
 
   return jsonb_build_object('comment_id', v_row.id);
@@ -110,6 +128,8 @@ declare
 begin
   if v_uid is null then raise exception 'Not authenticated' using errcode = '28000'; end if;
 
+  perform public.enforce_rate_limit('comment_delete', 60, interval '1 hour');
+
   update public.post_comments
      set deleted_at = now()
    where id = p_comment_id
@@ -125,6 +145,7 @@ $$;
 create or replace function public.post_comments_page(
   p_post_id uuid,
   p_before timestamptz default null,
+  p_before_id uuid default null,
   p_limit int default 30
 )
 returns table (
@@ -144,12 +165,18 @@ as $$
   select c.id,
          c.author_id,
          pr.display_name,
-         -- Mirror the established avatar-visibility gate (see feed_page in
-         -- 20260811000500_rpc_feed_posts.sql:133-134, which itself mirrors
-         -- get_friend_leaderboard in 20260101000800_rpc_social.sql:247): self always sees it;
-         -- a friend only when the owner has avatar_visibility = 'friends'. Returning it
-         -- unconditionally would leak an avatar its owner hid from friends.
-         case when c.author_id = auth.uid() or ps.avatar_visibility = 'friends'
+         -- The gate is about the COMMENTER's privacy choice and the VIEWER's relationship to
+         -- the commenter — NOT to the post author. Comment authors here are friends of the
+         -- post's author and need no relationship to the viewer (that's what can_view_post
+         -- below already established), so unlike feed_page (whose row set is pre-restricted to
+         -- the viewer's own friends, making avatar_visibility = 'friends' alone sufficient) this
+         -- must separately check public.is_accepted_friend(auth.uid(), c.author_id). Without
+         -- that check, any viewer who can merely see the THREAD (e.g. a mutual friend of the
+         -- post's author who is a stranger to this particular commenter) would also see that
+         -- commenter's avatar regardless of the commenter's own privacy setting.
+         case when c.author_id = auth.uid()
+                or (ps.avatar_visibility = 'friends'
+                    and public.is_accepted_friend(auth.uid(), c.author_id))
               then pr.avatar_path end,
          c.body,
          c.created_at,
@@ -167,19 +194,34 @@ as $$
      and pr.deleted_at is null
      and public.can_view_post(auth.uid(), p_post_id)
      and not public.is_blocked(auth.uid(), c.author_id)
-     and c.created_at < coalesce(p_before, now() + interval '1 second')
-   order by c.created_at
+     -- Compound keyset cursor, ascending (oldest-first is correct for a comment thread — unlike
+     -- feed_page's newest-first). The cursor moves strictly forward in the SAME direction as the
+     -- sort, i.e. "created_at, id) > cursor", not "<": a page ordered ASC that filtered with "<"
+     -- would keep re-serving the oldest rows on every subsequent page and could never reach the
+     -- newer end. Coalescing a missing p_before_id to the MINIMUM uuid (not the maximum, as
+     -- feed_page does for its DESC order) keeps that same "incomplete cursor is inclusive, never
+     -- lossy" property for this ascending sort: a caller that supplies p_before without
+     -- p_before_id may re-see one already-shown row rather than silently skip past unseen ones.
+     and (p_before is null
+          or (c.created_at, c.id) > (p_before, coalesce(p_before_id, '00000000-0000-0000-0000-000000000000'::uuid)))
+   order by c.created_at, c.id
    limit least(greatest(coalesce(p_limit, 30), 1), 100);
 $$;
 
-revoke all on function public.can_view_post(uuid, uuid) from public, anon;
+-- can_view_post is revoked from `authenticated` too, not just public/anon: it is a pure
+-- visibility oracle with no rate limit or side effect, and every RPC above already calls it as
+-- its owner from inside a SECURITY DEFINER function, where the call resolves against the
+-- function owner's privileges regardless of what the calling role was granted directly —
+-- exactly how enforce_rate_limit (also owner-only) already works from inside add_comment.
+-- Granting it to `authenticated` would let any client probe arbitrary (uid, post_id) pairs
+-- directly for no product reason.
+revoke all on function public.can_view_post(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.toggle_post_cheers(uuid) from public, anon;
 revoke all on function public.add_comment(uuid, text, uuid[]) from public, anon;
 revoke all on function public.delete_comment(uuid) from public, anon;
-revoke all on function public.post_comments_page(uuid, timestamptz, int) from public, anon;
+revoke all on function public.post_comments_page(uuid, timestamptz, uuid, int) from public, anon;
 
-grant execute on function public.can_view_post(uuid, uuid) to authenticated;
 grant execute on function public.toggle_post_cheers(uuid) to authenticated;
 grant execute on function public.add_comment(uuid, text, uuid[]) to authenticated;
 grant execute on function public.delete_comment(uuid) to authenticated;
-grant execute on function public.post_comments_page(uuid, timestamptz, int) to authenticated;
+grant execute on function public.post_comments_page(uuid, timestamptz, uuid, int) to authenticated;
