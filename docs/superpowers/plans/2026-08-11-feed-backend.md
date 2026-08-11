@@ -20,6 +20,7 @@
 - Auth guard in every RPC: `if v_uid is null then raise exception 'Not authenticated' using errcode = '28000'; end if;`
 - Errcode convention already in use: `28000` not authenticated, `P0002` target not available/not found, `22023` invalid argument, `P0001` rate limited.
 - Test harness: `./supabase/tests/run_local_pg.sh` (needs Homebrew `postgresql@16`; override with `PG_BIN=...`). It applies every migration in filename order, then `_shim_grants.sql`, then `seed.sql`, then `rls_rpc_suite.sql` under `ON_ERROR_STOP=1`.
+- `supabase/tests/rls_rpc_suite.sql` ends with a `ALL RLS/RPC CHECKS PASSED` banner. New `tN` blocks must be inserted BEFORE it, never after, or the banner claims success before the checks it summarises have run.
 - Test style, matching the existing suite: switch identity with `reset role; set role authenticated; set app.uid = '<uuid>';` then a `do $$ begin ... raise exception 'FAIL tN: ...'; ... raise notice 'PASS tN: ...'; end $$;` block. Continue the existing `tN` numbering — the suite currently ends at **t25**, so start at **t26**.
 - Seeded identities and relationships (from `supabase/seed.sql`): Alice `00000000-0000-4000-8000-0000000000a1`; Barnaby `...b2` (accepted friend of Alice); Ceri `...c3` (accepted friend of Alice); Dev `...d4` (**blocked** by Alice, friendship forced to `removed`). Barnaby and Ceri are **not** friends with each other — that is the non-friend case.
 - No Swift files. No changes under `CheekyPint/`, `CheekyPintCore/`, `CheekyPintTests/`, `CheekyPintUITests/`.
@@ -116,7 +117,9 @@ as $$
            translate(
              coalesce(t, ''),
              chr(8203) || chr(8204) || chr(8205) || chr(8206) || chr(8207) ||
-             chr(8234) || chr(8235) || chr(8236) || chr(8237) || chr(8238) || chr(65279),
+             chr(8234) || chr(8235) || chr(8236) || chr(8237) || chr(8238) ||
+             -- Word joiner and the four bidi isolates: the Trojan-Source scrambling set.
+             chr(8288) || chr(8294) || chr(8295) || chr(8296) || chr(8297) || chr(65279),
              ''
            ),
            '[[:cntrl:]]', '', 'g'
@@ -136,9 +139,13 @@ create table public.posts (
   created_at timestamptz not null default now(),
   deleted_at timestamptz,
   -- A post is a photo, some words, or both — never neither.
-  constraint posts_has_content check (body is not null or image_path is not null),
+  constraint posts_has_content check (
+    char_length(btrim(coalesce(body, ''))) > 0 or char_length(btrim(coalesce(image_path, ''))) > 0
+  ),
   -- A pub reference always carries the label the feed renders, so readers need no join.
-  constraint posts_pub_needs_label check (pub_id is null or place_label is not null)
+  constraint posts_pub_needs_label check (
+    pub_id is null or char_length(btrim(coalesce(place_label, ''))) > 0
+  )
 );
 
 comment on table public.posts is
@@ -156,8 +163,6 @@ create table public.post_cheers (
 
 comment on table public.post_cheers is
   'One Cheers per user per post; the RPC toggles. Never affects drink totals.';
-
-create index post_cheers_post_idx on public.post_cheers (post_id);
 
 create table public.post_comments (
   id uuid primary key default gen_random_uuid(),
