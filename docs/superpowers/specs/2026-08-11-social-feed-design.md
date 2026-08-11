@@ -1,7 +1,7 @@
 # Social feed + instant beer logging — design
 
 Date: 2026-08-11
-Status: approved (design), not yet implemented
+Status: approved. Part A + Part C implemented (branch `feat/instant-log-nudge`). Part B1 (backend) in progress on `feat/feed-backend`; Part B2 (client) not started.
 
 ## Context
 
@@ -108,15 +108,16 @@ Four tables, following existing conventions: RLS enabled, `revoke all` from
 | `created_at` | timestamptz not null | `now()` |
 | `deleted_at` | timestamptz null | soft delete |
 
-Constraint `posts_has_content`: `body is not null or image_path is not null`.
-Constraint `posts_pub_needs_label`: `pub_id is null or place_label is not null`.
+Constraint `posts_has_content`: at least one of `body` / `image_path` is non-blank after trimming.
+An `is not null` test would be wrong — an empty string satisfies it, admitting content-free posts.
+Constraint `posts_pub_needs_label`: `pub_id is null or place_label` is non-blank after trimming.
 Index on `(created_at desc)` and `(author_id, created_at desc)`.
 
 No foreign key to `pint_entries` — posts are standalone.
 
 **`post_cheers`** — the feed reaction (see Part C for why the friend nudge had to be renamed to
 free this name). `(post_id, user_id)` composite primary key, `created_at`. One per user per post;
-the RPC toggles. Index on `(post_id)`.
+the RPC toggles. No separate `(post_id)` index — the primary key's leading column already serves it.
 
 **`post_comments`** — `id`, `post_id` (cascade), `author_id` (cascade), `body` not null
 (`char_length between 1 and 280`), `created_at`, `deleted_at`. Index on `(post_id, created_at)`.
@@ -148,7 +149,7 @@ folder (`{user_id}/…`), reads gated through the feed RPCs.
 |---|---|
 | `create_post(body, image_path, place_label, pub_id)` | Validates content present, sanitises body, rate-limited |
 | `delete_post(post_id)` | Author only; sets `deleted_at` |
-| `feed_page(before timestamptz, limit int)` | Friends-only, keyset pagination, block-aware |
+| `feed_page(before timestamptz, before_id uuid, limit int)` | Friends-only, block-aware; compound `(created_at, id)` keyset cursor so tied timestamps cannot skip rows; `avatar_path` gated on the owner's privacy setting |
 | `toggle_post_cheers(post_id)` | Insert or delete; returns new state + count |
 | `add_comment(post_id, body, mentioned_user_ids[])` | Validates mentions are accepted friends |
 | `delete_comment(comment_id)` | Author only; soft delete |
