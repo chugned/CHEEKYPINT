@@ -656,6 +656,41 @@ do $$ declare v_post uuid; v_comment uuid; v jsonb; ok boolean := false; v_count
   raise notice 'PASS t39: only the comment''s author can delete it';
 end $$;
 
+-- ============================ FEED: reporting ============================
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+
+do $$ declare v_post uuid; v jsonb; v_reported uuid; v_linked uuid; begin
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000b2' limit 1;
+  if v_post is null then raise exception 'FAIL t41: no Barnaby post to report'; end if;
+  select public.report_post(v_post, 'inappropriate_post_image', 'not on') into v;
+  if (v->>'report_id') is null then raise exception 'FAIL t41: report_post returned no id'; end if;
+  if (v->>'status') <> 'open' then raise exception 'FAIL t41: status % (want open)', v->>'status'; end if;
+  select reported_user_id, post_id into v_reported, v_linked
+    from public.reports where id = (v->>'report_id')::uuid;
+  if v_reported <> '00000000-0000-4000-8000-0000000000b2' then
+    raise exception 'FAIL t41: reported_user_id % is not the post author', v_reported; end if;
+  if v_linked <> v_post then raise exception 'FAIL t41: report not linked to the post'; end if;
+  raise notice 'PASS t41: report_post files against the author and links the post';
+end $$;
+
+do $$ declare v_own uuid; ok_self boolean := false; ok_hidden boolean := false; begin
+  select post_id into v_own from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
+  if v_own is null then raise exception 'FAIL t42: no own post to test with'; end if;
+  begin
+    perform public.report_post(v_own, 'inappropriate_text', null);
+  exception when others then ok_self := true;
+  end;
+  begin
+    perform public.report_post('00000000-0000-4000-8000-00000000dead', 'inappropriate_text', null);
+  exception when others then ok_hidden := true;
+  end;
+  if not ok_self then raise exception 'FAIL t42: reported own post'; end if;
+  if not ok_hidden then raise exception 'FAIL t42: reported an invisible post'; end if;
+  raise notice 'PASS t42: cannot report your own post or one you cannot see';
+end $$;
+
 reset role;
 \echo '-------------------------------------------'
 \echo 'ALL RLS/RPC CHECKS PASSED'
