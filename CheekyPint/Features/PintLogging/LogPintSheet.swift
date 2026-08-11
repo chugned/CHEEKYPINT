@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 import CheekyPintCore
 
 /// The lightweight confirmation sheet for logging a pint (master prompt §7). A stable
@@ -6,8 +7,6 @@ import CheekyPintCore
 /// double-tap or a flaky network can't create duplicates. Submission is disabled while in
 /// flight. Nothing is stored until the user confirms.
 struct LogPintSheet: View {
-    let profile: Profile
-    let activeSession: PubSession?
     let onLogged: (PintEntry) async -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -18,11 +17,8 @@ struct LogPintSheet: View {
     @State private var alcoholFree = false
     @State private var occurredAt = Date()
     @State private var note = ""
-    @State private var attachToSession = true
     @State private var selectedBeer = BeerCatalog.beers[0]
     @State private var beerSearch = ""
-    @State private var selectedPub: Pub?
-    @State private var showPubPicker = false
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -35,8 +31,6 @@ struct LogPintSheet: View {
                 beerSection
                 servingSection
                 detailsSection
-                if activeSession != nil { sessionSection }
-                pubSection
                 noteSection
                 fillToLogSection
                 if let errorMessage {
@@ -53,9 +47,6 @@ struct LogPintSheet: View {
                 }
             }
             .overlay { if isSaving { ProgressView().tint(Theme.Palette.accent) } }
-            .sheet(isPresented: $showPubPicker) {
-                PubPickerView { pub in selectedPub = pub }
-            }
         }
         .presentationDetents([.medium, .large])
     }
@@ -68,7 +59,9 @@ struct LogPintSheet: View {
                 .textFieldStyle(.roundedBorder)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Theme.Spacing.md) {
+                // Lazy: a plain HStack built all 98 cards up front, so every one started its
+                // image request immediately instead of just the handful actually on screen.
+                LazyHStack(spacing: Theme.Spacing.md) {
                     ForEach(filteredBeers) { beer in
                         BeerCard(beer: beer, isSelected: beer == selectedBeer) {
                             selectedBeer = beer
@@ -117,32 +110,6 @@ struct LogPintSheet: View {
         }
     }
 
-    private var sessionSection: some View {
-        Section {
-            Toggle("Add to current session", isOn: $attachToSession).tint(Theme.Palette.accent)
-        } footer: {
-            Text("Counts toward this session's standings with the mates who joined.")
-        }
-    }
-
-    private var pubSection: some View {
-        Section("Pub (optional)") {
-            Button {
-                showPubPicker = true
-            } label: {
-                HStack {
-                    Text(selectedPub?.name ?? "Choose a pub")
-                        .foregroundStyle(selectedPub == nil ? Theme.Palette.textSecondary : Theme.Palette.textPrimary)
-                    Spacer()
-                    Image(systemName: "chevron.right").foregroundStyle(Theme.Palette.textSecondary)
-                }
-            }
-            if selectedPub != nil {
-                Button("Clear pub", role: .destructive) { selectedPub = nil }
-            }
-        }
-    }
-
     private var noteSection: some View {
         Section("Private note (optional)") {
             TextField("Just for you...", text: $note, axis: .vertical).lineLimit(1...3)
@@ -174,8 +141,8 @@ struct LogPintSheet: View {
                 serving: serving,
                 volumeMl: volume,
                 alcoholFree: alcoholFree,
-                pubID: selectedPub?.id,
-                sessionID: (attachToSession ? activeSession?.id : nil),
+                pubID: nil,
+                sessionID: nil,
                 note: BeerCatalog.diaryNote(for: selectedBeer, userNote: cleanNote)
             )
             container.analytics.track(.pintSaved)
@@ -419,9 +386,29 @@ enum BeerCatalog {
         )
     }
 
+    /// Wikimedia serves thumbnails only at a fixed set of widths — anything else is a hard 400.
+    /// The old `?width=700` was not one of them, so Commons quietly rounded up to the 960px
+    /// bucket (~3x the bytes we need). 500px is the smallest permitted size that still covers the
+    /// 168x126pt card on a 3x screen.
+    private static let thumbnailWidth = 500
+
+    /// Percent-encoding matching Wikimedia's own canonical form: everything outside the unreserved
+    /// set is escaped, including parentheses and non-ASCII, which `.urlPathAllowed` would leave be.
+    private static let thumbnailPathAllowed: CharacterSet = {
+        var set = CharacterSet.alphanumerics
+        set.insert(charactersIn: "-._~")
+        return set
+    }()
+
     private static func commonsImageURL(_ file: String) -> URL {
-        let encoded = file.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file
-        return URL(string: "https://commons.wikimedia.org/wiki/Special:FilePath/\(encoded)?width=700")!
+        // `Special:FilePath` costs two 302s (commons.wikimedia.org -> upload.wikimedia.org) on
+        // every image. The thumbnail path is derivable instead: Wikimedia shards by the MD5 of the
+        // underscored filename, so we can address the CDN directly and skip both redirects.
+        let key = file.replacingOccurrences(of: " ", with: "_")
+        let digest = Insecure.MD5.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        let encoded = key.addingPercentEncoding(withAllowedCharacters: thumbnailPathAllowed) ?? key
+        let shard = "\(digest.prefix(1))/\(digest.prefix(2))"
+        return URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/\(shard)/\(encoded)/\(thumbnailWidth)px-\(encoded)")!
     }
 
     private static func commonsSourceURL(_ file: String) -> URL {
@@ -528,7 +515,7 @@ private struct BeerCard: View {
     @ViewBuilder
     private var beerImage: some View {
         if let imageURL = beer.imageURL {
-            AsyncImage(url: imageURL) { phase in
+            RemoteImage(url: imageURL) { phase in
                 switch phase {
                 case .success(let image):
                     image
@@ -536,13 +523,11 @@ private struct BeerCard: View {
                         .scaledToFill()
                 case .failure:
                     fallbackImage
-                case .empty:
+                case .loading:
                     ZStack {
                         Theme.Palette.backgroundSecondary
                         ProgressView().tint(Theme.Palette.accent)
                     }
-                @unknown default:
-                    fallbackImage
                 }
             }
         } else {
