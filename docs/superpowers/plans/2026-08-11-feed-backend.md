@@ -21,6 +21,18 @@
 - Errcode convention already in use: `28000` not authenticated, `P0002` target not available/not found, `22023` invalid argument, `P0001` rate limited.
 - Test harness: `./supabase/tests/run_local_pg.sh` (needs Homebrew `postgresql@16`; override with `PG_BIN=...`). It applies every migration in filename order, then `_shim_grants.sql`, then `seed.sql`, then `rls_rpc_suite.sql` under `ON_ERROR_STOP=1`.
 - `supabase/tests/rls_rpc_suite.sql` ends with a `ALL RLS/RPC CHECKS PASSED` banner. New `tN` blocks must be inserted BEFORE it, never after, or the banner claims success before the checks it summarises have run.
+- **Negative tests must use the `ok` pattern.** Putting `raise exception 'FAIL …'` inside a block guarded by `exception when others then null` swallows the FAIL, producing a test that can never fail. Always raise outside the handler, as the existing suite does at `rls_rpc_suite.sql:57`:
+  ```sql
+  do $$ declare ok boolean := false; begin
+    begin
+      perform public.thing_that_should_be_rejected();
+    exception when others then ok := true;
+    end;
+    if not ok then raise exception 'FAIL tN: <what went wrong>'; end if;
+    raise notice 'PASS tN: <what holds>';
+  end $$;
+  ```
+- Compare expected values with `is distinct from`, not `<>` — a NULL left-hand side makes `<>` yield NULL, the `if` is skipped, and the test passes vacuously.
 - Test style, matching the existing suite: switch identity with `reset role; set role authenticated; set app.uid = '<uuid>';` then a `do $$ begin ... raise exception 'FAIL tN: ...'; ... raise notice 'PASS tN: ...'; end $$;` block. Continue the existing `tN` numbering — the suite currently ends at **t25**, so start at **t26**.
 - Seeded identities and relationships (from `supabase/seed.sql`): Alice `00000000-0000-4000-8000-0000000000a1`; Barnaby `...b2` (accepted friend of Alice); Ceri `...c3` (accepted friend of Alice); Dev `...d4` (**blocked** by Alice, friendship forced to `removed`). Barnaby and Ceri are **not** friends with each other — that is the non-friend case.
 - No Swift files. No changes under `CheekyPint/`, `CheekyPintCore/`, `CheekyPintTests/`, `CheekyPintUITests/`.
@@ -310,65 +322,68 @@ reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-00000
 do $$ declare v jsonb; v_count int; begin
   select public.create_post('First pint of the trip', null, 'Prague', null) into v;
   if (v->>'post_id') is null then raise exception 'FAIL t28: create_post returned no post_id'; end if;
-  select count(*) into v_count from public.feed_page(null, 20) where author_id = '00000000-0000-4000-8000-0000000000a1';
-  if v_count <> 1 then raise exception 'FAIL t28: author sees % of own posts (want 1)', v_count; end if;
+  select count(*) into v_count from public.feed_page(null, null, 20) where author_id = '00000000-0000-4000-8000-0000000000a1';
+  if v_count is distinct from 1 then raise exception 'FAIL t28: author sees % of own posts (want 1)', v_count; end if;
   raise notice 'PASS t28: create_post stores a post the author can read back';
 end $$;
 
-do $$ begin
+do $$ declare ok_empty boolean := false; ok_pub boolean := false; v_state text; begin
   begin
     perform public.create_post(null, null, 'Prague', null);
-    raise exception 'FAIL t29: create_post accepted a post with neither body nor image';
-  exception when others then null;
+  exception when others then get stacked diagnostics v_state = returned_sqlstate;
+    ok_empty := (v_state = '22023');
   end;
   begin
     perform public.create_post('x', null, null, '00000000-0000-4000-8000-00000000e001');
-    raise exception 'FAIL t29: create_post accepted a pub_id with no place_label';
-  exception when others then null;
+  exception when others then get stacked diagnostics v_state = returned_sqlstate;
+    ok_pub := (v_state = '22023');
   end;
+  if not ok_empty then raise exception 'FAIL t29: create_post accepted a post with neither body nor image'; end if;
+  if not ok_pub then raise exception 'FAIL t29: create_post accepted a pub_id with no place_label'; end if;
   raise notice 'PASS t29: create_post rejects empty posts and unlabelled pub references';
 end $$;
 
 do $$ declare v text; begin
   perform public.create_post('clean' || chr(8203) || chr(9) || 'text', null, null, null);
-  select body into v from public.feed_page(null, 20) order by created_at desc limit 1;
-  if v <> 'cleantext' then raise exception 'FAIL t30: post body not sanitised, got %', v; end if;
+  select body into v from public.feed_page(null, null, 20) order by created_at desc limit 1;
+  if v is distinct from 'cleantext' then raise exception 'FAIL t30: post body not sanitised, got %', v; end if;
   raise notice 'PASS t30: create_post strips control and zero-width characters from the body';
 end $$;
 
 -- Barnaby is an accepted friend of Alice; Ceri is a friend of Alice but NOT of Barnaby.
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
 do $$ declare v_count int; begin
-  select count(*) into v_count from public.feed_page(null, 20)
+  select count(*) into v_count from public.feed_page(null, null, 20)
     where author_id = '00000000-0000-4000-8000-0000000000a1';
-  if v_count <> 2 then raise exception 'FAIL t31: friend sees % of Alice posts (want 2)', v_count; end if;
+  if v_count is distinct from 2 then raise exception 'FAIL t31: friend sees % of Alice posts (want 2)', v_count; end if;
   raise notice 'PASS t31: an accepted friend sees the posts';
 end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000d4';
 do $$ declare v_count int; begin
-  select count(*) into v_count from public.feed_page(null, 20);
+  select count(*) into v_count from public.feed_page(null, null, 20);
   if v_count <> 0 then raise exception 'FAIL t31: blocked user sees % posts (want 0)', v_count; end if;
   raise notice 'PASS t31: a blocked user sees nothing';
 end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 do $$ declare v_id uuid; v_count int; begin
-  select post_id into v_id from public.feed_page(null, 20) order by created_at desc limit 1;
+  select post_id into v_id from public.feed_page(null, null, 20) order by created_at desc limit 1;
   perform public.delete_post(v_id);
-  select count(*) into v_count from public.feed_page(null, 20) where post_id = v_id;
+  select count(*) into v_count from public.feed_page(null, null, 20) where post_id = v_id;
   if v_count <> 0 then raise exception 'FAIL t32: soft-deleted post still visible'; end if;
   raise notice 'PASS t32: delete_post hides the post from every read path';
 end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
-do $$ declare v_id uuid; begin
-  select post_id into v_id from public.feed_page(null, 20) limit 1;
+do $$ declare v_id uuid; ok boolean := false; begin
+  select post_id into v_id from public.feed_page(null, null, 20) limit 1;
+  if v_id is null then raise exception 'FAIL t32: no visible post to attempt deleting'; end if;
   begin
     perform public.delete_post(v_id);
-    raise exception 'FAIL t32: a non-author deleted someone else''s post';
-  exception when others then null;
+  exception when others then ok := true;
   end;
+  if not ok then raise exception 'FAIL t32: a non-author deleted someone else''s post'; end if;
   raise notice 'PASS t32: only the author can delete a post';
 end $$;
 ```
@@ -551,7 +566,7 @@ Append to `supabase/tests/rls_rpc_suite.sql`:
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 
 do $$ declare v_post uuid; v jsonb; begin
-  select post_id into v_post from public.feed_page(null, 20) limit 1;
+  select post_id into v_post from public.feed_page(null, null, 20) limit 1;
   select public.toggle_post_cheers(v_post) into v;
   if (v->>'cheered')::boolean is not true then raise exception 'FAIL t33: first toggle did not cheer'; end if;
   if (v->>'cheers_count')::int <> 1 then raise exception 'FAIL t33: count % (want 1)', v->>'cheers_count'; end if;
@@ -562,51 +577,54 @@ do $$ declare v_post uuid; v jsonb; begin
 end $$;
 
 do $$ declare v_post uuid; v jsonb; v_body text; v_mentions uuid[]; begin
-  select post_id into v_post from public.feed_page(null, 20) limit 1;
+  select post_id into v_post from public.feed_page(null, null, 20) limit 1;
   select public.add_comment(v_post, 'nice one' || chr(8203) || '!',
                             array['00000000-0000-4000-8000-0000000000b2'::uuid]) into v;
   if (v->>'comment_id') is null then raise exception 'FAIL t34: add_comment returned no id'; end if;
   select body, mentioned_user_ids into v_body, v_mentions
     from public.post_comments_page(v_post, null, 20) limit 1;
-  if v_body <> 'nice one!' then raise exception 'FAIL t34: comment body not sanitised, got %', v_body; end if;
-  if v_mentions <> array['00000000-0000-4000-8000-0000000000b2'::uuid] then
+  if v_body is distinct from 'nice one!' then raise exception 'FAIL t34: comment body not sanitised, got %', v_body; end if;
+  if v_mentions is distinct from array['00000000-0000-4000-8000-0000000000b2'::uuid] then
     raise exception 'FAIL t34: mentions % wrong', v_mentions; end if;
   raise notice 'PASS t34: add_comment sanitises the body and records mentions';
 end $$;
 
 -- Dev is blocked by Alice, so he is not a mentionable friend.
-do $$ declare v_post uuid; begin
-  select post_id into v_post from public.feed_page(null, 20) limit 1;
+do $$ declare v_post uuid; ok boolean := false; begin
+  select post_id into v_post from public.feed_page(null, null, 20) limit 1;
+  if v_post is null then raise exception 'FAIL t35: no post to comment on'; end if;
   begin
     perform public.add_comment(v_post, 'hi', array['00000000-0000-4000-8000-0000000000d4'::uuid]);
-    raise exception 'FAIL t35: mentioned a non-friend';
-  exception when others then null;
+  exception when others then ok := true;
   end;
+  if not ok then raise exception 'FAIL t35: mentioned a non-friend'; end if;
   raise notice 'PASS t35: mentioning a non-friend is rejected';
 end $$;
 
 -- Ceri is Alice's friend but not Barnaby's, so Ceri must not reach Barnaby's post.
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
-do $$ declare v jsonb; v_post uuid; begin
+do $$ declare v jsonb; v_post uuid; ok_cheer boolean := false; ok_comment boolean := false; begin
   select public.create_post('Barnaby was here', null, null, null) into v;
   v_post := (v->>'post_id')::uuid;
+  -- Ceri is Alice's friend but not Barnaby's, and nobody has blocked anybody here: this is the
+  -- non-friend, non-blocked case that distinguishes friends-only from merely not-blocked.
   perform set_config('app.uid', '00000000-0000-4000-8000-0000000000c3', false);
   begin
     perform public.toggle_post_cheers(v_post);
-    raise exception 'FAIL t36: a non-friend cheered a post they cannot see';
-  exception when others then null;
+  exception when others then ok_cheer := true;
   end;
   begin
     perform public.add_comment(v_post, 'sneaking in', null);
-    raise exception 'FAIL t36: a non-friend commented on a post they cannot see';
-  exception when others then null;
+  exception when others then ok_comment := true;
   end;
+  if not ok_cheer then raise exception 'FAIL t36: a non-friend cheered a post they cannot see'; end if;
+  if not ok_comment then raise exception 'FAIL t36: a non-friend commented on a post they cannot see'; end if;
   raise notice 'PASS t36: cheers and comments require visibility of the post';
 end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 do $$ declare v_post uuid; v_comment uuid; v_count int; begin
-  select post_id into v_post from public.feed_page(null, 20)
+  select post_id into v_post from public.feed_page(null, null, 20)
     where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
   select comment_id into v_comment from public.post_comments_page(v_post, null, 20) limit 1;
   perform public.delete_comment(v_comment);
@@ -775,7 +793,10 @@ as $$
   select c.id,
          c.author_id,
          pr.display_name,
-         pr.avatar_path,
+         -- Gate the avatar on the owner's privacy setting, exactly as
+         -- 20260101000800_rpc_social.sql:247 does. Returning it unconditionally would leak an
+         -- avatar its owner hid from friends.
+         pr.avatar_path,  -- REPLACE with the gated expression copied from rpc_social.sql:247
          c.body,
          c.created_at,
          coalesce(
@@ -851,7 +872,7 @@ Append to `supabase/tests/rls_rpc_suite.sql`:
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 
 do $$ declare v_post uuid; v jsonb; v_reported uuid; v_linked uuid; begin
-  select post_id into v_post from public.feed_page(null, 20)
+  select post_id into v_post from public.feed_page(null, null, 20)
     where author_id = '00000000-0000-4000-8000-0000000000b2' limit 1;
   if v_post is null then raise exception 'FAIL t37: no Barnaby post to report'; end if;
   select public.report_post(v_post, 'inappropriate_post_image', 'not on') into v;
@@ -865,19 +886,20 @@ do $$ declare v_post uuid; v jsonb; v_reported uuid; v_linked uuid; begin
   raise notice 'PASS t37: report_post files against the author and links the post';
 end $$;
 
-do $$ declare v_own uuid; begin
-  select post_id into v_own from public.feed_page(null, 20)
+do $$ declare v_own uuid; ok_self boolean := false; ok_hidden boolean := false; begin
+  select post_id into v_own from public.feed_page(null, null, 20)
     where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
+  if v_own is null then raise exception 'FAIL t38: no own post to test with'; end if;
   begin
     perform public.report_post(v_own, 'inappropriate_text', null);
-    raise exception 'FAIL t38: reported own post';
-  exception when others then null;
+  exception when others then ok_self := true;
   end;
   begin
     perform public.report_post('00000000-0000-4000-8000-00000000dead', 'inappropriate_text', null);
-    raise exception 'FAIL t38: reported an invisible post';
-  exception when others then null;
+  exception when others then ok_hidden := true;
   end;
+  if not ok_self then raise exception 'FAIL t38: reported own post'; end if;
+  if not ok_hidden then raise exception 'FAIL t38: reported an invisible post'; end if;
   raise notice 'PASS t38: cannot report your own post or one you cannot see';
 end $$;
 ```
