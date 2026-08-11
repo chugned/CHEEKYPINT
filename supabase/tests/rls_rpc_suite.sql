@@ -1135,45 +1135,204 @@ do $$ declare ok boolean := false; begin
 end $$;
 
 -- ============================ DATA EXPORT (Art. 15 / 20) ============================
+-- Fix round 1 (mutation testing): cheers_given, blocks and mentioned_user_ids were previously
+-- untestable because the fixture data never gave a wrong filter anything *different* to
+-- return (post_cheers was empty; only Alice had ever placed a block; no comment's mentions
+-- were read at all). Every setup step below exists to give a specific predicate real,
+-- non-vacuous, foreign-tainted data so its ownership assertion can actually fire.
+
+-- t51 setup (Alice): a fresh post to cheer/comment on, a comment mentioning her friend
+-- Barnaby, a report she files against him, a pub preference, and a Nudge to him.
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
-do $$ declare v jsonb; begin
+do $$ declare v jsonb; v_post uuid; begin
+  select public.create_post('t51 fixture: alice export post', null, null, null) into v;
+  v_post := (v->>'post_id')::uuid;
+  perform public.add_comment(v_post, 't51 fixture: alice mentions barnaby',
+                              array['00000000-0000-4000-8000-0000000000b2']::uuid[]);
+  perform public.toggle_post_cheers(v_post);
+  perform public.report_user('00000000-0000-4000-8000-0000000000b2', 'other',
+                              't51 fixture: alice reports barnaby');
+  insert into public.user_pub_preferences (user_id, pub_id, hidden_from_favourites)
+  values ('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-00000000e001', true)
+  on conflict (user_id, pub_id) do update set hidden_from_favourites = true;
+  perform public.send_nudge('00000000-0000-4000-8000-0000000000b2');
+  raise notice 'PASS t51 setup: Alice creates a fixture post, cheers it, comments mentioning Barnaby, reports Barnaby, sets a pub preference, and Nudges Barnaby';
+end $$;
+
+-- t51 setup (Barnaby): cheers Alice's fixture post (I1 — a foreign cheerer on a post Alice
+-- authored, the exact shape the "who cheered my post" mutation would leak); @mentions Dev in
+-- his OWN post, then blocks Dev (I2 — a foreign blocker_id; I3 — a foreign mentioned_user_id
+-- that must not leak into Alice's comments); Nudges Alice back. Barnaby and Dev are ALREADY
+-- accepted friends from t37b's setup (never undone, unlike the Barnaby–Ceri pair t46 removes),
+-- so no fresh friend request is needed here — sending one would just hit send_friend_request's
+-- "reuse any existing live edge" branch and come back already 'accepted', not 'pending'.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
+do $$ declare v_post uuid; v jsonb; begin
+  select post_id into v_post from public.feed_page(null, null, 50)
+    where author_id = '00000000-0000-4000-8000-0000000000a1'
+      and body = 't51 fixture: alice export post'
+    limit 1;
+  if v_post is null then
+    raise exception 'FAIL t51 setup: Barnaby cannot see Alice''s fixture post'; end if;
+  perform public.toggle_post_cheers(v_post);
+
+  select public.create_post('t51 fixture: barnaby post for foreign mention', null, null, null) into v;
+  perform public.add_comment((v->>'post_id')::uuid,
+    't51 fixture: barnaby mentions dev, must not leak into alice export',
+    array['00000000-0000-4000-8000-0000000000d4']::uuid[]);
+
+  perform public.block_user('00000000-0000-4000-8000-0000000000d4');
+  perform public.send_nudge('00000000-0000-4000-8000-0000000000a1');
+  raise notice 'PASS t51 setup: Barnaby cheers Alice''s post, mentions then blocks Dev, and Nudges Alice';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare v jsonb; v_fixture_comment jsonb; begin
   select public.export_my_data() into v;
   if v is null then raise exception 'FAIL t51: export returned null'; end if;
   if (v->'profile'->>'id') is distinct from '00000000-0000-4000-8000-0000000000a1' then
     raise exception 'FAIL t51: export profile id is %', v->'profile'->>'id'; end if;
+
+  -- I4: privacy_settings must name its own owner. Previously nothing in the object could
+  -- confirm whose nine visibility switches these were, so a `where s.user_id <> v_uid` mutation
+  -- handed the caller another user's settings and this suite stayed green.
+  if (v->'privacy_settings'->>'user_id') is distinct from '00000000-0000-4000-8000-0000000000a1' then
+    raise exception 'FAIL t51: privacy_settings.user_id is %, not the caller', v->'privacy_settings'->>'user_id';
+  end if;
+
+  -- Deliberate exclusion (see migration header): a live invite credential has no place in a
+  -- downloadable export, however convenient to include.
+  if v ? 'friend_tokens' then
+    raise exception 'FAIL t51: export must not include friend_tokens (live invite credential)'; end if;
+
   if jsonb_typeof(v->'pint_entries') is distinct from 'array' then
     raise exception 'FAIL t51: pint_entries is not an array'; end if;
   if jsonb_array_length(v->'pint_entries') < 1 then
     raise exception 'FAIL t51: export contains no pint entries for a user who has 4'; end if;
-  -- The export must be caller-scoped: no other user's rows may appear, in ANY collection —
-  -- a missing auth.uid() filter anywhere is a data breach, not just an over-return, so every
-  -- collection gets its own ownership assertion rather than trusting pint_entries alone.
+
+  -- The export must be caller-scoped: no other user's rows may appear, in ANY collection — a
+  -- missing auth.uid() filter anywhere is a data breach, not just an over-return. Every
+  -- assertion below now has a non-vacuous, foreign-tainted fixture behind it (see t51 setup
+  -- above), so a wrong filter has something real to leak, not an empty table to pass over.
   if exists (
     select 1 from jsonb_array_elements(v->'pint_entries') e
      where (e->>'user_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
   ) then raise exception 'FAIL t51: export leaked another user''s pint entries'; end if;
+
   if exists (
     select 1 from jsonb_array_elements(v->'posts') e
      where (e->>'author_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
   ) then raise exception 'FAIL t51: export leaked another user''s posts'; end if;
+
   if exists (
     select 1 from jsonb_array_elements(v->'comments') e
      where (e->>'author_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
   ) then raise exception 'FAIL t51: export leaked another user''s comments'; end if;
+
+  -- I3: mentioned_user_ids must be a (possibly empty) array on every comment, at least one
+  -- comment must carry a non-empty list, Alice's own fixture comment must still contain the
+  -- friend she actually mentioned (Barnaby), and it must NOT contain the foreign target
+  -- Barnaby separately mentioned in his own comment (Dev). That last check is what catches an
+  -- uncorrelated read pulling every mention on the platform into every comment; the "contains
+  -- Barnaby" check is what catches the correlation being silently flipped to inbound mentions.
+  if exists (
+    select 1 from jsonb_array_elements(v->'comments') e
+     where jsonb_typeof(e->'mentioned_user_ids') is distinct from 'array'
+  ) then raise exception 'FAIL t51: a comment''s mentioned_user_ids is not an array'; end if;
+  if not exists (
+    select 1 from jsonb_array_elements(v->'comments') e
+     where jsonb_array_length(e->'mentioned_user_ids') > 0
+  ) then raise exception 'FAIL t51: no comment carries any mentioned_user_ids'; end if;
+  select e into v_fixture_comment from jsonb_array_elements(v->'comments') e
+   where e->>'body' = 't51 fixture: alice mentions barnaby';
+  if v_fixture_comment is null then
+    raise exception 'FAIL t51: alice''s fixture comment is missing from the export'; end if;
+  if not (v_fixture_comment->'mentioned_user_ids' ? '00000000-0000-4000-8000-0000000000b2') then
+    raise exception 'FAIL t51: alice''s fixture comment lost its mention of barnaby: %',
+      v_fixture_comment->'mentioned_user_ids';
+  end if;
+  if v_fixture_comment->'mentioned_user_ids' ? '00000000-0000-4000-8000-0000000000d4' then
+    raise exception 'FAIL t51: alice''s fixture comment leaked a foreign mention of dev: %',
+      v_fixture_comment->'mentioned_user_ids';
+  end if;
+
+  -- I1: cheers_given must be non-empty (Alice really cheered) and every element must be hers —
+  -- Barnaby also cheered Alice's fixture post, so a filter mistakenly scoped to "who cheered
+  -- posts I authored" instead of "cheers I gave" would leak his row here.
+  if jsonb_array_length(v->'cheers_given') < 1 then
+    raise exception 'FAIL t51: export contains no cheers for a user who cheered a post'; end if;
   if exists (
     select 1 from jsonb_array_elements(v->'cheers_given') e
      where (e->>'user_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
   ) then raise exception 'FAIL t51: export leaked another user''s cheers'; end if;
+
   if exists (
     select 1 from jsonb_array_elements(v->'friends') e
      where (e->>'requester_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
        and (e->>'addressee_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
   ) then raise exception 'FAIL t51: export returned a friendship the caller is not party to'; end if;
+
+  -- I2: blocks must be non-empty and every element must be a block Alice PLACED — Barnaby now
+  -- also blocks Dev, so an unfiltered (or wrongly-directed) read has a foreign blocker_id to leak.
+  if jsonb_array_length(v->'blocks') < 1 then
+    raise exception 'FAIL t51: export contains no blocks for a user who has placed one'; end if;
   if exists (
     select 1 from jsonb_array_elements(v->'blocks') e
      where (e->>'blocker_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
   ) then raise exception 'FAIL t51: export leaked a block the caller did not place'; end if;
-  raise notice 'PASS t51: export_my_data returns the caller''s own data only';
+
+  -- JC3: reports the caller filed are included, but never the accused party's identity.
+  if jsonb_array_length(v->'reports') < 1 then
+    raise exception 'FAIL t51: export contains no reports for a user who filed one'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(v->'reports') e
+     where (e->>'reporter_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
+  ) then raise exception 'FAIL t51: export leaked a report the caller did not file'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(v->'reports') e where e ? 'reported_user_id'
+  ) then raise exception 'FAIL t51: export exposed reported_user_id on a filed report'; end if;
+
+  if jsonb_array_length(v->'user_pub_preferences') < 1 then
+    raise exception 'FAIL t51: export contains no user_pub_preferences for a user who set one'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(v->'user_pub_preferences') e
+     where (e->>'user_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
+  ) then raise exception 'FAIL t51: export leaked another user''s pub preferences'; end if;
+
+  if jsonb_array_length(v->'pub_sessions') < 1 then
+    raise exception 'FAIL t51: export contains no pub_sessions for a user who hosts one'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(v->'pub_sessions') e
+     where (e->>'host_user_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
+  ) then raise exception 'FAIL t51: export leaked a session the caller does not host'; end if;
+
+  if jsonb_array_length(v->'session_members') < 1 then
+    raise exception 'FAIL t51: export contains no session_members for a user who joined one'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(v->'session_members') e
+     where (e->>'user_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
+  ) then raise exception 'FAIL t51: export leaked another user''s session membership'; end if;
+
+  if jsonb_array_length(v->'nudges_sent') < 1 then
+    raise exception 'FAIL t51: export contains no nudges_sent for a user who sent one'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(v->'nudges_sent') e
+     where (e->>'sender_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
+  ) then raise exception 'FAIL t51: export leaked a nudge the caller did not send'; end if;
+
+  if jsonb_array_length(v->'nudges_received') < 1 then
+    raise exception 'FAIL t51: export contains no nudges_received for a user who received one'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(v->'nudges_received') e
+     where (e->>'recipient_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
+  ) then raise exception 'FAIL t51: export leaked a nudge the caller did not receive'; end if;
+
+  -- I5: every collection is far under the 10,000-row cap, so truncated must read false.
+  if (v->>'truncated') is distinct from 'false' then
+    raise exception 'FAIL t51: truncated is % for fixture data far under the cap', v->>'truncated';
+  end if;
+
+  raise notice 'PASS t51: export_my_data returns the caller''s own data only, across all collections';
 end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
