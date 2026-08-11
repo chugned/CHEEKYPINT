@@ -17,7 +17,7 @@
 - Functions: `security definer`, `set search_path = ''`, all identifiers schema-qualified, `revoke all ... from public, anon;` then `grant execute ... to authenticated;` — except maintenance functions, which are revoked from `authenticated` too and run only via the service role or a scheduled job.
 - Every mutating RPC calls `public.enforce_rate_limit`.
 - **Negative tests must use the `ok` pattern** — raise the FAIL *outside* the `exception when others` handler, or the test can never fail. Compare with `is distinct from`, never `<>`.
-- New test blocks go **before** the trailing `reset role; \echo 'ALL RLS/RPC CHECKS PASSED'` banner. The suite currently ends at **t45**; start at **t46**.
+- New test blocks go **before** the trailing `reset role; \echo 'ALL RLS/RPC CHECKS PASSED'` banner. The suite currently ends at **t48**; Task 3 starts at **t49**.
 - Seeded identities: Alice `…a1`, Barnaby `…b2`, Ceri `…c3`, Dev `…d4`. **The seed graph is NOT the graph your test sees.** The suite mutates state as it runs: by t44 Ceri and Barnaby are accepted friends and Dev is friended with Barnaby too, so a block that assumes "Ceri is not Barnaby's friend" (true at seed time) is silently testing a *friend*. Before relying on any relationship, either assert it or establish it in your own setup (`remove_friend` / `send_friend_request` + accept). Filter every `feed_page` select by `author_id` — earlier tests seeded posts for several authors.
 - `public.posts` is RLS-enabled with no policies, so a direct `select … from public.posts` returns nothing even for its author. Read post ids through `feed_page`, never a raw table select.
 - Mind per-identity rate limits when seeding: `post_create` 20/hr, `post_comment` 60/hr, `cheers_toggle` 120/hr, `report` 20/hr.
@@ -348,7 +348,7 @@ git commit -m "feat: add a storage GC queue so purges cannot orphan objects"
 **Files:**
 - Create: `supabase/migrations/20260812000300_enqueue_deleted_post_images.sql`
 - Create: `supabase/migrations/20260812000400_retention_purges.sql`
-- Modify: `supabase/tests/rls_rpc_suite.sql` (append t48–t49)
+- Modify: `supabase/tests/rls_rpc_suite.sql` (append t49–t50)
 
 **Interfaces:**
 - Consumes: `public.enqueue_storage_object(text, text)` from Task 2.
@@ -367,8 +367,8 @@ do $$ declare v jsonb; v_post uuid; queued int; begin
   select count(*) into queued from public.storage_gc_queue
    where bucket_id = 'post-images' and object_path = '00000000-0000-4000-8000-0000000000a1/retain.jpg';
   if queued is distinct from 1 then
-    raise exception 'FAIL t48: deleting a post queued % GC entries (want 1)', queued; end if;
-  raise notice 'PASS t48: deleting a post queues its photo for storage deletion';
+    raise exception 'FAIL t49: deleting a post queued % GC entries (want 1)', queued; end if;
+  raise notice 'PASS t49: deleting a post queues its photo for storage deletion';
 end $$;
 
 reset role;
@@ -376,11 +376,11 @@ do $$ declare purged int; still int; begin
   -- Age the soft-deleted rows past the retention window, then purge.
   update public.posts set deleted_at = now() - interval '40 days' where deleted_at is not null;
   select public.purge_soft_deleted_posts(interval '30 days') into purged;
-  if purged < 1 then raise exception 'FAIL t49: purge removed % posts (want >=1)', purged; end if;
+  if purged < 1 then raise exception 'FAIL t50: purge removed % posts (want >=1)', purged; end if;
   select count(*) into still from public.posts where deleted_at < now() - interval '30 days';
   if still is distinct from 0 then
-    raise exception 'FAIL t49: % aged soft-deleted posts survived the purge', still; end if;
-  raise notice 'PASS t49: aged soft-deleted posts are purged';
+    raise exception 'FAIL t50: % aged soft-deleted posts survived the purge', still; end if;
+  raise notice 'PASS t50: aged soft-deleted posts are purged';
 end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
@@ -389,8 +389,8 @@ do $$ declare ok boolean := false; begin
     perform public.purge_soft_deleted_posts(interval '30 days');
   exception when others then ok := true;
   end;
-  if not ok then raise exception 'FAIL t49: a client could run a retention purge'; end if;
-  raise notice 'PASS t49: retention purges are not client-callable';
+  if not ok then raise exception 'FAIL t50: a client could run a retention purge'; end if;
+  raise notice 'PASS t50: retention purges are not client-callable';
 end $$;
 ```
 
@@ -454,7 +454,7 @@ Revoke all four from `public, anon, authenticated` and grant to nobody — servi
 
 - [ ] **Step 5: Run the suite to verify it passes**
 
-Expected: `PASS t48` and both `PASS t49` notices.
+Expected: `PASS t49` and both `PASS t50` notices.
 
 - [ ] **Step 6: Document the schedule**
 
@@ -475,7 +475,7 @@ git commit -m "feat: enforce the published retention policy"
 
 **Files:**
 - Create: `supabase/migrations/20260812000500_export_my_data.sql`
-- Modify: `supabase/tests/rls_rpc_suite.sql` (append t50)
+- Modify: `supabase/tests/rls_rpc_suite.sql` (append t52)
 
 **Interfaces:**
 - Produces: `public.export_my_data() returns jsonb` — one document containing the caller's profile, privacy settings, pint entries, posts, comments, cheers given, friends and blocks.
@@ -487,19 +487,19 @@ git commit -m "feat: enforce the published retention policy"
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 do $$ declare v jsonb; begin
   select public.export_my_data() into v;
-  if v is null then raise exception 'FAIL t50: export returned null'; end if;
+  if v is null then raise exception 'FAIL t51: export returned null'; end if;
   if (v->'profile'->>'id') is distinct from '00000000-0000-4000-8000-0000000000a1' then
-    raise exception 'FAIL t50: export profile id is %', v->'profile'->>'id'; end if;
+    raise exception 'FAIL t51: export profile id is %', v->'profile'->>'id'; end if;
   if jsonb_typeof(v->'pint_entries') is distinct from 'array' then
-    raise exception 'FAIL t50: pint_entries is not an array'; end if;
+    raise exception 'FAIL t51: pint_entries is not an array'; end if;
   if jsonb_array_length(v->'pint_entries') < 1 then
-    raise exception 'FAIL t50: export contains no pint entries for a user who has 4'; end if;
+    raise exception 'FAIL t51: export contains no pint entries for a user who has 4'; end if;
   -- The export must be caller-scoped: no other user's rows may appear.
   if exists (
     select 1 from jsonb_array_elements(v->'pint_entries') e
      where (e->>'user_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
-  ) then raise exception 'FAIL t50: export leaked another user''s pint entries'; end if;
-  raise notice 'PASS t50: export_my_data returns the caller''s own data only';
+  ) then raise exception 'FAIL t51: export leaked another user''s pint entries'; end if;
+  raise notice 'PASS t51: export_my_data returns the caller''s own data only';
 end $$;
 ```
 
@@ -521,7 +521,7 @@ Then `revoke all ... from public, anon;` and `grant execute ... to authenticated
 
 - [ ] **Step 4: Run the suite to verify it passes**
 
-Expected: `PASS t50`.
+Expected: `PASS t51`.
 
 - [ ] **Step 5: Commit**
 
@@ -589,7 +589,7 @@ runs as the owner. So revoking client EXECUTE breaks nothing.
 
 **Files:**
 - Create: `supabase/migrations/20260812000600_revoke_helper_oracles.sql`
-- Modify: `supabase/tests/rls_rpc_suite.sql` (append t51)
+- Modify: `supabase/tests/rls_rpc_suite.sql` (append t52)
 
 **Interfaces:** no new objects. Removes `authenticated` EXECUTE from four helpers.
 
@@ -617,17 +617,17 @@ begin
       '00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000b2');
   exception when others then ok_profile := true;
   end;
-  if not ok_friend then raise exception 'FAIL t51: is_accepted_friend is a client-callable oracle'; end if;
-  if not ok_blocked then raise exception 'FAIL t51: is_blocked is a client-callable oracle'; end if;
-  if not ok_profile then raise exception 'FAIL t51: can_view_profile is a client-callable oracle'; end if;
-  raise notice 'PASS t51: relationship helpers are not callable by clients';
+  if not ok_friend then raise exception 'FAIL t52: is_accepted_friend is a client-callable oracle'; end if;
+  if not ok_blocked then raise exception 'FAIL t52: is_blocked is a client-callable oracle'; end if;
+  if not ok_profile then raise exception 'FAIL t52: can_view_profile is a client-callable oracle'; end if;
+  raise notice 'PASS t52: relationship helpers are not callable by clients';
 end $$;
 
 -- ...and the feed still works, i.e. the revoke did not break the definer functions that use them.
 do $$ declare visible int; begin
   select count(*) into visible from public.feed_page(null, null, 20);
-  if visible < 1 then raise exception 'FAIL t51: feed_page returned % rows after the revoke', visible; end if;
-  raise notice 'PASS t51: feed_page still works — nested definer calls are unaffected';
+  if visible < 1 then raise exception 'FAIL t52: feed_page returned % rows after the revoke', visible; end if;
+  raise notice 'PASS t52: feed_page still works — nested definer calls are unaffected';
 end $$;
 ```
 
@@ -637,7 +637,7 @@ end $$;
 cd ~/Projects/cheekypint && ./supabase/tests/run_local_pg.sh
 ```
 
-Expected: FAIL at `FAIL t51: is_accepted_friend is a client-callable oracle` — the blanket grant is
+Expected: FAIL at `FAIL t52: is_accepted_friend is a client-callable oracle` — the blanket grant is
 still in force.
 
 - [ ] **Step 3: Create the migration**
@@ -666,7 +666,7 @@ that file is also client-granted and only ever used internally, add it and justi
 
 - [ ] **Step 4: Run the suite to verify it passes**
 
-Expected: both `PASS t51` notices, and every earlier block still green — that second assertion is
+Expected: both `PASS t52` notices, and every earlier block still green — that second assertion is
 the important one, since it proves the revoke did not break the definer functions built on these.
 
 - [ ] **Step 5: Commit**
