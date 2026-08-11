@@ -550,24 +550,35 @@ do $$ declare v_post uuid; v_req jsonb; ok boolean := false; begin
   raise notice 'PASS t37b: mention target must also be able to view the post, not merely be a friend of the commenter';
 end $$;
 
--- Ceri is Alice's friend but not Barnaby's, so Ceri must not reach Barnaby's post.
-do $$ declare v jsonb; v_post uuid; ok_cheer boolean := false; ok_comment boolean := false; ok_mention boolean := false; begin
-  select public.create_post('Barnaby was here', null, null, null) into v;
-  v_post := (v->>'post_id')::uuid;
+-- I7 regression: pin the friends-only mention rule in isolation from post VISIBILITY. This
+-- deliberately uses ALICE's post, not Barnaby's own: Ceri is Alice's accepted friend
+-- (seed.sql:59-61), so can_view_post(Ceri, alice_post) is TRUE — that half of add_comment's
+-- `not is_accepted_friend(...) or not can_view_post(...)` guard cannot mask anything here.
+-- Ceri is not Barnaby's friend, and nobody has blocked anybody in this pair, so a rejection can
+-- ONLY be explained by is_accepted_friend(Barnaby, Ceri) being false. (An earlier version of
+-- this test used Barnaby's own post as the target; there, Ceri could not view that post EITHER,
+-- so the can_view_post half of the guard alone would reject the mention even if the friendship
+-- half were regressed to a bare "not is_blocked" check — the exact I7 regression this test
+-- exists to catch would have gone undetected.)
+do $$ declare v_post uuid; ok boolean := false; begin
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
+  if v_post is null then raise exception 'FAIL t37c: no Alice post available'; end if;
 
-  -- I7 regression: pin the friends-only mention rule in isolation from post-visibility/blocking.
-  -- Barnaby's own post is visible to him (he is the author), and Ceri is a non-friend who is NOT
-  -- blocked by anybody, so this rejection can only be explained by the friendship check — t37
-  -- alone leaves a guard weakened to "not is_blocked" undetected, since Dev fails both checks
-  -- there.
   begin
     perform public.add_comment(v_post, 'hey', array['00000000-0000-4000-8000-0000000000c3'::uuid]);
-  exception when others then ok_mention := true;
+  exception when others then ok := true;
   end;
-  if not ok_mention then
-    raise exception 'FAIL t37c: mentioning a non-friend, non-blocked user was accepted';
+  if not ok then
+    raise exception 'FAIL t37c: mentioning a non-friend who CAN see the post was accepted';
   end if;
-  raise notice 'PASS t37c: mentioning a non-friend (unblocked) is rejected on friendship grounds alone';
+  raise notice 'PASS t37c: mentioning a non-friend who can see the post is still rejected on friendship grounds alone';
+end $$;
+
+-- Ceri is Alice's friend but not Barnaby's, so Ceri must not reach Barnaby's post.
+do $$ declare v jsonb; v_post uuid; ok_cheer boolean := false; ok_comment boolean := false; begin
+  select public.create_post('Barnaby was here', null, null, null) into v;
+  v_post := (v->>'post_id')::uuid;
 
   -- Ceri is Alice's friend but not Barnaby's, and nobody has blocked anybody here: this is the
   -- non-friend, non-blocked case that distinguishes friends-only from merely not-blocked.
