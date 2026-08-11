@@ -1027,6 +1027,52 @@ do $$ declare ok boolean := false; begin
   raise notice 'PASS t47: clients cannot enqueue GC work directly';
 end $$;
 
+-- ============================ STORAGE GC QUEUE: claim marker + failure record ============================
+-- Owner-only setup (reset role), same as the storage fixture insert above (t46 setup): these
+-- maintenance functions are revoked from authenticated, and postgres is a superuser so grants
+-- don't gate it anyway.
+reset role;
+do $$ declare v_id uuid; v_attempts int; begin
+  perform public.enqueue_storage_object('post-images', 'gc-claim-marker-test/t48.jpg');
+  select id into v_id from public.storage_gc_queue
+   where bucket_id = 'post-images' and object_path = 'gc-claim-marker-test/t48.jpg';
+  if v_id is null then
+    raise exception 'FAIL t48: enqueue_storage_object did not create the fixture row'; end if;
+
+  perform public.claim_storage_gc(10);
+  select attempts into v_attempts from public.storage_gc_queue where id = v_id;
+  if v_attempts is distinct from 1 then
+    raise exception 'FAIL t48: attempts after one claim was % (want 1)', v_attempts; end if;
+
+  perform public.claim_storage_gc(10);
+  select attempts into v_attempts from public.storage_gc_queue where id = v_id;
+  if v_attempts is distinct from 2 then
+    raise exception 'FAIL t48: attempts after a second claim was % (want 2)', v_attempts; end if;
+
+  raise notice 'PASS t48: claim_storage_gc increments attempts on every claim';
+end $$;
+
+do $$ declare v_id uuid; v_processed timestamptz; v_error text; begin
+  select id into v_id from public.storage_gc_queue
+   where bucket_id = 'post-images' and object_path = 'gc-claim-marker-test/t48.jpg';
+  if v_id is null then
+    raise exception 'FAIL t48: fixture row from the previous assertion is missing'; end if;
+
+  perform public.mark_storage_gc_failed(array[v_id], 'simulated remove() failure for t48');
+
+  select processed_at, last_error into v_processed, v_error
+    from public.storage_gc_queue where id = v_id;
+
+  if v_processed is distinct from null then
+    raise exception
+      'FAIL t48: mark_storage_gc_failed set processed_at to % (want it left null so the row stays claimable)',
+      v_processed; end if;
+  if v_error is distinct from 'simulated remove() failure for t48' then
+    raise exception 'FAIL t48: last_error was % (want the recorded message)', v_error; end if;
+
+  raise notice 'PASS t48: mark_storage_gc_failed records last_error and leaves the row claimable';
+end $$;
+
 reset role;
 \echo '-------------------------------------------'
 \echo 'ALL RLS/RPC CHECKS PASSED'

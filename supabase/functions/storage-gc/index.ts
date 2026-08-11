@@ -8,7 +8,11 @@
 //   1. Reject any caller that does not present the service-role key itself as its bearer token.
 //      This function is for scheduled invocation (cron / an ops trigger), never the app, so
 //      there is no user JWT to authenticate here the way delete-account authenticates one.
-//   2. Claim a batch of unprocessed rows via claim_storage_gc().
+//   2. Claim a batch of unprocessed rows via claim_storage_gc(), which (as of
+//      20260812000250_storage_gc_claim_marker.sql) is `for update skip locked` and increments
+//      each claimed row's `attempts` — so a second, overlapping drain cannot claim the same
+//      rows, and a row that keeps failing carries a rising, visible count instead of retrying
+//      silently forever.
 //   3. Group the batch by bucket_id and remove() each bucket's objects in one call — remove()
 //      takes a single bucket and a list of paths, and different buckets share no path
 //      namespace, so they cannot be removed together.
@@ -16,11 +20,12 @@
 //      for every bucket in the batch to finish. Grouping by bucket_id means we always know
 //      exactly which ids belong to the bucket that just succeeded, so marking them done is
 //      correct regardless of what happens to any other bucket in the same batch: those objects
-//      really are gone from storage. On the first bucket whose remove() fails, stop and return
-//      500 with the error. Rows already marked done for earlier buckets stay done. The failed
-//      bucket's rows, and any bucket not yet attempted, stay unprocessed (processed_at is still
-//      null) and are picked up again by the next scheduled run — there is no retry loop inside
-//      this invocation.
+//      really are gone from storage. On the first bucket whose remove() fails, record the
+//      failure via mark_storage_gc_failed (stamps `last_error`; leaves `processed_at` null so
+//      the row stays claimable) and stop, returning 500 with the error. Rows already marked
+//      done for earlier buckets stay done. The failed bucket's rows, and any bucket not yet
+//      attempted, stay unprocessed and are picked up again by the next scheduled run — there is
+//      no retry loop inside this invocation.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 
@@ -75,6 +80,14 @@ Deno.serve(async (req: Request) => {
   for (const [bucket, group] of byBucket) {
     const { error: removeErr } = await admin.storage.from(bucket).remove(group.paths);
     if (removeErr) {
+      // Record the failure on this bucket's rows before returning — the rows stay unprocessed
+      // (mark_storage_gc_failed never touches processed_at), but now carry a rising `attempts`
+      // (from claim_storage_gc) and a `last_error`, so a stuck bucket is visible to an operator
+      // instead of failing silently on every drain forever.
+      await admin.rpc("mark_storage_gc_failed", {
+        p_ids: group.ids,
+        p_error: removeErr.message,
+      });
       return json({ error: `${bucket} remove failed: ${removeErr.message}` }, 500);
     }
 

@@ -10,6 +10,8 @@
 - [ ] Create the `avatars` storage bucket (migration does this) and confirm policies
 - [ ] Schedule `prune_rate_limit_events` (daily) and any leaderboard cache jobs if added
 - [ ] Verify RLS suite against a staging DB: `supabase/tests/run_local_pg.sh`
+- [ ] Monitor `storage_gc_queue` for rows with `attempts > 3` or a non-null `last_error` — a stuck
+      drain (e.g. a rotated service-role key) is otherwise invisible
 
 ## App configuration
 
