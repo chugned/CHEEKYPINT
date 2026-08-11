@@ -50,7 +50,7 @@
 
 **Interfaces:**
 - Consumes: `public.posts`, `public.is_accepted_friend(uuid, uuid)`.
-- Produces: bucket `post-images` with `public = false`; policy `post_images_read_visible_posts` on `storage.objects`.
+- Produces: bucket `post-images` with `public = false`; `public.can_read_post_image(uuid, text) returns boolean` (granted to `authenticated` — a policy body runs as the querying role); policy `post_images_read_visible_posts` on `storage.objects`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -147,6 +147,37 @@ $$;
 revoke all on function public.bucket_is_public(text) from public, anon;
 grant execute on function public.bucket_is_public(text) to authenticated;
 
+-- Answers the storage policy's question without tripping over posts' own RLS. A policy body is
+-- evaluated with the CALLER's privileges, and public.posts is RLS-enabled with no policies, so a
+-- plain `exists (select ... from public.posts ...)` inside the policy always returns false —
+-- including for the object's own author, making every photo unreadable. A security-definer helper
+-- runs as the owner and can read posts, while still deciding from the uid it is handed.
+create or replace function public.can_read_post_image(p_uid uuid, p_path text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+      from public.posts p
+     where p.image_path = p_path
+       and p.deleted_at is null
+       and (p.author_id = p_uid or public.is_accepted_friend(p_uid, p.author_id))
+  );
+$$;
+
+comment on function public.can_read_post_image(uuid, text) is
+  'Whether p_uid may read the storage object at p_path: it must back a live post they authored or an accepted friend authored.';
+
+-- Unlike can_view_post (revoked from authenticated because it is only called from inside other
+-- security-definer functions), this MUST be executable by `authenticated`: an RLS policy body runs
+-- as the querying role. That is not a new leak — it answers exactly what the policy already reveals
+-- by returning the row or not. Do not "tighten" this grant; doing so silently breaks every photo.
+revoke all on function public.can_read_post_image(uuid, text) from public, anon;
+grant execute on function public.can_read_post_image(uuid, text) to authenticated;
+
 -- Replace the blanket authenticated-read policy with one that asks the feed's own question.
 drop policy if exists "post_images_read_authenticated" on storage.objects;
 
@@ -154,13 +185,7 @@ create policy "post_images_read_visible_posts"
   on storage.objects for select to authenticated
   using (
     bucket_id = 'post-images'
-    and exists (
-      select 1
-        from public.posts p
-       where p.image_path = storage.objects.name
-         and p.deleted_at is null
-         and (p.author_id = auth.uid() or public.is_accepted_friend(auth.uid(), p.author_id))
-    )
+    and public.can_read_post_image(auth.uid(), storage.objects.name)
   );
 ```
 
