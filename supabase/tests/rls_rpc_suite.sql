@@ -1009,6 +1009,24 @@ do $$ declare visible int; begin
   raise notice 'PASS t46: deleting the post immediately revokes the friend''s access to the photo';
 end $$;
 
+-- ============================ STORAGE GC QUEUE ============================
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare visible int; begin
+  select count(*) into visible from public.storage_gc_queue;
+  if visible is distinct from 0 then
+    raise exception 'FAIL t47: storage_gc_queue exposed % rows to a client', visible; end if;
+  raise notice 'PASS t47: the GC queue is invisible to clients';
+end $$;
+
+do $$ declare ok boolean := false; begin
+  begin
+    perform public.enqueue_storage_object('post-images', 'x/y.jpg');
+  exception when others then ok := true;
+  end;
+  if not ok then raise exception 'FAIL t47: a client could enqueue a GC entry'; end if;
+  raise notice 'PASS t47: clients cannot enqueue GC work directly';
+end $$;
+
 reset role;
 \echo '-------------------------------------------'
 \echo 'ALL RLS/RPC CHECKS PASSED'
