@@ -82,18 +82,18 @@ do $$ declare cnt int; kings int; begin
 end $$;
 
 do $$ declare ok boolean := false; begin
-  perform public.send_cheers('00000000-0000-4000-8000-0000000000b2');
+  perform public.send_nudge('00000000-0000-4000-8000-0000000000b2');
   begin
-    perform public.send_cheers('00000000-0000-4000-8000-0000000000b2');
+    perform public.send_nudge('00000000-0000-4000-8000-0000000000b2');
   exception when others then ok := true; end;
-  if not ok then raise exception 'FAIL t21: stacked a second unanswered Cheers'; end if;
-  raise notice 'PASS t21: one unanswered Cheers per friend is enforced';
+  if not ok then raise exception 'FAIL t21: stacked a second unanswered Nudge'; end if;
+  raise notice 'PASS t21: one unanswered Nudge per friend is enforced';
 end $$;
 
 do $$ declare visible int; begin
-  select count(*) into visible from public.cheers;
-  if visible <> 0 then raise exception 'FAIL t22: direct Cheers table exposed % rows', visible; end if;
-  raise notice 'PASS t22: direct Cheers rows are hidden; reads are RPC-only';
+  select count(*) into visible from public.nudges;
+  if visible <> 0 then raise exception 'FAIL t22: direct Nudge table exposed % rows', visible; end if;
+  raise notice 'PASS t22: direct Nudge rows are hidden; reads are RPC-only';
 end $$;
 
 -- ============================ BARNABY ============================
@@ -131,14 +131,14 @@ do $$ declare ok boolean := false; begin
 end $$;
 
 do $$ declare incoming int; remaining int; begin
-  select count(*) into incoming from public.get_received_cheers()
+  select count(*) into incoming from public.get_received_nudges()
     where sender_id = '00000000-0000-4000-8000-0000000000a1';
-  if incoming <> 1 then raise exception 'FAIL t23: Barnaby received % Cheers from Alice', incoming; end if;
-  perform public.send_cheers('00000000-0000-4000-8000-0000000000a1');
-  select count(*) into remaining from public.get_received_cheers()
+  if incoming <> 1 then raise exception 'FAIL t23: Barnaby received % Nudges from Alice', incoming; end if;
+  perform public.send_nudge('00000000-0000-4000-8000-0000000000a1');
+  select count(*) into remaining from public.get_received_nudges()
     where sender_id = '00000000-0000-4000-8000-0000000000a1';
-  if remaining <> 0 then raise exception 'FAIL t23: Cheers back did not acknowledge incoming Cheers'; end if;
-  raise notice 'PASS t23: Cheers back acknowledges incoming and returns a new Cheers';
+  if remaining <> 0 then raise exception 'FAIL t23: Nudge back did not acknowledge incoming Nudge'; end if;
+  raise notice 'PASS t23: Nudge back acknowledges incoming and returns a new Nudge';
 end $$;
 
 -- ============================ CERI ============================
@@ -176,19 +176,19 @@ do $$ declare n int; begin
 end $$;
 
 do $$ declare ok boolean := false; begin
-  begin perform public.send_cheers('00000000-0000-4000-8000-0000000000a1');
+  begin perform public.send_nudge('00000000-0000-4000-8000-0000000000a1');
   exception when others then ok := true; end;
-  if not ok then raise exception 'FAIL t24: blocked user sent Alice a Cheers'; end if;
-  raise notice 'PASS t24: blocked/non-friend user cannot send Cheers';
+  if not ok then raise exception 'FAIL t24: blocked user sent Alice a Nudge'; end if;
+  raise notice 'PASS t24: blocked/non-friend user cannot send Nudge';
 end $$;
 
 -- ============================ TOKEN REVOCATION ============================
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 do $$ declare incoming int; begin
-  select count(*) into incoming from public.get_received_cheers()
+  select count(*) into incoming from public.get_received_nudges()
     where sender_id = '00000000-0000-4000-8000-0000000000b2';
-  if incoming <> 1 then raise exception 'FAIL t25: Alice received % returned Cheers', incoming; end if;
-  raise notice 'PASS t25: returned Cheers is visible to its recipient';
+  if incoming <> 1 then raise exception 'FAIL t25: Alice received % returned Nudges', incoming; end if;
+  raise notice 'PASS t25: returned Nudge is visible to its recipient';
 end $$;
 
 do $$ declare t text; begin
