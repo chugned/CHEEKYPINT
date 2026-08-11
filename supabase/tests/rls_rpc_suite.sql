@@ -209,3 +209,24 @@ reset role;
 \echo '-------------------------------------------'
 \echo 'ALL RLS/RPC CHECKS PASSED'
 \echo '-------------------------------------------'
+
+-- ============================ FEED: table lockdown ============================
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+
+do $$ declare visible int; begin
+  select count(*) into visible from public.posts;
+  if visible <> 0 then raise exception 'FAIL t26: direct posts select exposed % rows', visible; end if;
+  select count(*) into visible from public.post_cheers;
+  if visible <> 0 then raise exception 'FAIL t26: direct post_cheers select exposed % rows', visible; end if;
+  select count(*) into visible from public.post_comments;
+  if visible <> 0 then raise exception 'FAIL t26: direct post_comments select exposed % rows', visible; end if;
+  select count(*) into visible from public.comment_mentions;
+  if visible <> 0 then raise exception 'FAIL t26: direct comment_mentions select exposed % rows', visible; end if;
+  raise notice 'PASS t26: feed tables are invisible to direct selects';
+end $$;
+
+do $$ declare v text; begin
+  select public.strip_ugc_control_chars('a' || chr(8203) || chr(9) || 'b' || chr(8237) || 'c') into v;
+  if v <> 'abc' then raise exception 'FAIL t27: strip_ugc_control_chars gave %', v; end if;
+  raise notice 'PASS t27: control, zero-width and bidi characters are stripped';
+end $$;
