@@ -18,7 +18,8 @@
 - Every mutating RPC calls `public.enforce_rate_limit`.
 - **Negative tests must use the `ok` pattern** — raise the FAIL *outside* the `exception when others` handler, or the test can never fail. Compare with `is distinct from`, never `<>`.
 - New test blocks go **before** the trailing `reset role; \echo 'ALL RLS/RPC CHECKS PASSED'` banner. The suite currently ends at **t45**; start at **t46**.
-- Seeded identities: Alice `…a1`, Barnaby `…b2` (Alice's friend), Ceri `…c3` (Alice's friend, NOT Barnaby's), Dev `…d4` (blocked by Alice). Filter every `feed_page` select by `author_id` — earlier tests seeded posts for several authors.
+- Seeded identities: Alice `…a1`, Barnaby `…b2`, Ceri `…c3`, Dev `…d4`. **The seed graph is NOT the graph your test sees.** The suite mutates state as it runs: by t44 Ceri and Barnaby are accepted friends and Dev is friended with Barnaby too, so a block that assumes "Ceri is not Barnaby's friend" (true at seed time) is silently testing a *friend*. Before relying on any relationship, either assert it or establish it in your own setup (`remove_friend` / `send_friend_request` + accept). Filter every `feed_page` select by `author_id` — earlier tests seeded posts for several authors.
+- `public.posts` is RLS-enabled with no policies, so a direct `select … from public.posts` returns nothing even for its author. Read post ids through `feed_page`, never a raw table select.
 - Mind per-identity rate limits when seeding: `post_create` 20/hr, `post_comment` 60/hr, `cheers_toggle` 120/hr, `report` 20/hr.
 - `export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` for any Swift/Xcode command.
 - No Swift changes in Tasks 1–4. The client work (ImageLoader sending a bearer token, an export screen) belongs to the Part B2 plan.
