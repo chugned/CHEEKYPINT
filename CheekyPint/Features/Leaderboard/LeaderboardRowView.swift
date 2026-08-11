@@ -1,7 +1,7 @@
 import SwiftUI
 import CheekyPintCore
 
-enum CheersButtonState {
+enum NudgeButtonState {
     case available
     case received
     case sent
@@ -9,8 +9,8 @@ enum CheersButtonState {
 
     var label: String {
         switch self {
-        case .available: return "Cheers"
-        case .received: return "Cheers back"
+        case .available: return "Nudge"
+        case .received: return "Nudge back"
         case .sent: return "Sent"
         case .sending: return "Sending"
         }
@@ -28,8 +28,8 @@ enum CheersButtonState {
 struct LeaderboardRowView: View {
     let row: LeaderboardRow
     var avatarURL: URL?
-    var cheersState: CheersButtonState?
-    var onCheers: (() -> Void)?
+    var nudgeState: NudgeButtonState?
+    var onNudge: (() -> Void)?
 
     var body: some View {
         HStack(spacing: Theme.Spacing.md) {
@@ -41,7 +41,7 @@ struct LeaderboardRowView: View {
                     .foregroundStyle(Theme.Palette.textPrimary)
                 if row.isCurrentUser {
                     Text("You").font(Theme.Typography.caption).foregroundStyle(Theme.Palette.textSecondary)
-                } else if cheersState == .received {
+                } else if nudgeState == .received {
                     Text("Cheered you")
                         .font(Theme.Typography.caption.weight(.semibold))
                         .foregroundStyle(Theme.Palette.accent)
@@ -50,26 +50,26 @@ struct LeaderboardRowView: View {
             Spacer()
             VStack(alignment: .trailing, spacing: Theme.Spacing.xxs) {
                 valueLabel
-                cheersButton
+                nudgeButton
             }
         }
         .padding(.vertical, Theme.Spacing.xs)
     }
 
     @ViewBuilder
-    private var cheersButton: some View {
-        if let cheersState, let onCheers {
-            Button(action: onCheers) {
-                Label(cheersState.label, systemImage: cheersState.systemImage)
+    private var nudgeButton: some View {
+        if let nudgeState, let onNudge {
+            Button(action: onNudge) {
+                Label(nudgeState.label, systemImage: nudgeState.systemImage)
             }
             .font(Theme.Typography.caption.weight(.semibold))
             .buttonStyle(.bordered)
             .buttonBorderShape(.capsule)
-            .tint(cheersState == .received ? Theme.Palette.accent : Theme.Palette.textSecondary)
-            .disabled(cheersState == .sent || cheersState == .sending)
-            .accessibilityHint(cheersState == .received
-                ? "Sends a Cheers back to this friend"
-                : "Sends a Cheers to this friend")
+            .tint(nudgeState == .received ? Theme.Palette.accent : Theme.Palette.textSecondary)
+            .disabled(nudgeState == .sent || nudgeState == .sending)
+            .accessibilityHint(nudgeState == .received
+                ? "Sends a Nudge back to this friend"
+                : "Sends a Nudge to this friend")
         }
     }
 

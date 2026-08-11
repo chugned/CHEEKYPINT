@@ -23,7 +23,7 @@ final class OnboardingUITests: XCTestCase {
     }
 
     @MainActor
-    func testCanCheersBackFromLeaderboard() throws {
+    func testCanNudgeBackFromLeaderboard() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestDemo"]
         app.launch()
@@ -32,11 +32,11 @@ final class OnboardingUITests: XCTestCase {
         XCTAssertTrue(leaderboardTab.waitForExistence(timeout: 10))
         leaderboardTab.tap()
 
-        let cheersBack = app.buttons["Cheers back"]
-        XCTAssertTrue(cheersBack.waitForExistence(timeout: 10))
-        cheersBack.tap()
+        let nudgeBack = app.buttons["Nudge back"]
+        XCTAssertTrue(nudgeBack.waitForExistence(timeout: 10))
+        nudgeBack.tap()
 
-        XCTAssertTrue(app.staticTexts["Cheers sent to Barnaby"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Nudge sent to Barnaby"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Sent"].exists)
     }
 }

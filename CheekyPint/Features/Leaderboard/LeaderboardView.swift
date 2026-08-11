@@ -9,13 +9,13 @@ struct LeaderboardView: View {
 
     @State private var period: LeaderboardPeriod = .week
     @State private var rows: [LeaderboardRow] = []
-    @State private var receivedCheers: [UUID: CheersDTO] = [:]
-    @State private var sentCheers: Set<UUID> = []
-    @State private var pendingCheers: Set<UUID> = []
+    @State private var receivedNudges: [UUID: NudgeDTO] = [:]
+    @State private var sentNudges: Set<UUID> = []
+    @State private var pendingNudges: Set<UUID> = []
     @State private var isLoading = false
     @State private var error: SupabaseError?
-    @State private var cheersConfirmation: String?
-    @State private var cheersError: String?
+    @State private var nudgeConfirmation: String?
+    @State private var nudgeError: String?
 
     var body: some View {
         VStack(spacing: Theme.Spacing.md) {
@@ -34,13 +34,13 @@ struct LeaderboardView: View {
         .navigationTitle("Leaderboard")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { Task { await load() } }
-        .alert("Couldn't send Cheers", isPresented: Binding(
-            get: { cheersError != nil },
-            set: { if !$0 { cheersError = nil } }
+        .alert("Couldn't send Nudge", isPresented: Binding(
+            get: { nudgeError != nil },
+            set: { if !$0 { nudgeError = nil } }
         )) {
-            Button("OK", role: .cancel) { cheersError = nil }
+            Button("OK", role: .cancel) { nudgeError = nil }
         } message: {
-            Text(cheersError ?? "Please try again.")
+            Text(nudgeError ?? "Please try again.")
         }
     }
 
@@ -65,8 +65,8 @@ struct LeaderboardView: View {
                     .listRowBackground(Theme.Palette.backgroundSecondary)
                 }
 
-                if let cheersConfirmation {
-                    Label(cheersConfirmation, systemImage: "hands.clap.fill")
+                if let nudgeConfirmation {
+                    Label(nudgeConfirmation, systemImage: "hands.clap.fill")
                         .font(Theme.Typography.callout.weight(.semibold))
                         .foregroundStyle(Theme.Palette.accent)
                         .listRowBackground(Theme.Palette.backgroundSecondary)
@@ -77,9 +77,9 @@ struct LeaderboardView: View {
                     LeaderboardRowView(
                         row: row,
                         avatarURL: container.avatarURL(for: row.avatarPath),
-                        cheersState: cheersState(for: row),
-                        onCheers: row.isCurrentUser ? nil : {
-                            Task { await sendCheers(to: row) }
+                        nudgeState: nudgeState(for: row),
+                        onNudge: row.isCurrentUser ? nil : {
+                            Task { await sendNudge(to: row) }
                         }
                     )
                     .listRowBackground(Theme.Palette.backgroundSecondary)
@@ -100,11 +100,11 @@ struct LeaderboardView: View {
                 profile: profile,
                 session: nil
             )
-            async let incomingCheers = container.friends.fetchReceivedCheers()
+            async let incomingNudges = container.friends.fetchReceivedNudges()
             rows = try await leaderboardRows
-            let incoming = try await incomingCheers
-            receivedCheers = Dictionary(uniqueKeysWithValues: incoming.map { ($0.senderId, $0) })
-            sentCheers.subtract(receivedCheers.keys)
+            let incoming = try await incomingNudges
+            receivedNudges = Dictionary(uniqueKeysWithValues: incoming.map { ($0.senderId, $0) })
+            sentNudges.subtract(receivedNudges.keys)
         } catch let e as SupabaseError {
             error = e
         } catch {
@@ -112,35 +112,35 @@ struct LeaderboardView: View {
         }
     }
 
-    private func cheersState(for row: LeaderboardRow) -> CheersButtonState? {
+    private func nudgeState(for row: LeaderboardRow) -> NudgeButtonState? {
         guard !row.isCurrentUser else { return nil }
-        if pendingCheers.contains(row.id) { return .sending }
-        if receivedCheers[row.id] != nil { return .received }
-        if sentCheers.contains(row.id) { return .sent }
+        if pendingNudges.contains(row.id) { return .sending }
+        if receivedNudges[row.id] != nil { return .received }
+        if sentNudges.contains(row.id) { return .sent }
         return .available
     }
 
-    private func sendCheers(to row: LeaderboardRow) async {
-        guard !row.isCurrentUser, !pendingCheers.contains(row.id) else { return }
-        pendingCheers.insert(row.id)
-        defer { pendingCheers.remove(row.id) }
+    private func sendNudge(to row: LeaderboardRow) async {
+        guard !row.isCurrentUser, !pendingNudges.contains(row.id) else { return }
+        pendingNudges.insert(row.id)
+        defer { pendingNudges.remove(row.id) }
 
         do {
-            try await container.friends.sendCheers(to: row.id)
-            receivedCheers.removeValue(forKey: row.id)
-            sentCheers.insert(row.id)
-            cheersConfirmation = "Cheers sent to \(row.displayName)"
+            try await container.friends.sendNudge(to: row.id)
+            receivedNudges.removeValue(forKey: row.id)
+            sentNudges.insert(row.id)
+            nudgeConfirmation = "Nudge sent to \(row.displayName)"
             Haptics.success()
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(3))
-                if cheersConfirmation == "Cheers sent to \(row.displayName)" {
-                    cheersConfirmation = nil
+                if nudgeConfirmation == "Nudge sent to \(row.displayName)" {
+                    nudgeConfirmation = nil
                 }
             }
         } catch let e as SupabaseError {
-            cheersError = e.friendlyMessage
+            nudgeError = e.friendlyMessage
         } catch {
-            cheersError = "Couldn't send Cheers. Please try again."
+            nudgeError = "Couldn't send Nudge. Please try again."
         }
     }
 }
