@@ -898,7 +898,7 @@ git commit -m "feat: add feed cheers, comments and mention RPCs"
 - Create: `supabase/migrations/20260811000300_report_category_post_image.sql`
 - Create: `supabase/migrations/20260811000400_feed_reports.sql`
 - Create: `supabase/migrations/20260811000700_rpc_feed_reports.sql`
-- Modify: `supabase/tests/rls_rpc_suite.sql` (append t39–t40)
+- Modify: `supabase/tests/rls_rpc_suite.sql` (append t41–t42)
 
 **Interfaces:**
 - Consumes: `public.reports` (existing: `reporter_id`, `reported_user_id`, `category public.report_category`, `details`, `status`, plus a `report_not_self` check); `public.can_view_post(uuid, uuid)` from Task 4.
@@ -919,22 +919,22 @@ reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-00000
 do $$ declare v_post uuid; v jsonb; v_reported uuid; v_linked uuid; begin
   select post_id into v_post from public.feed_page(null, null, 20)
     where author_id = '00000000-0000-4000-8000-0000000000b2' limit 1;
-  if v_post is null then raise exception 'FAIL t39: no Barnaby post to report'; end if;
+  if v_post is null then raise exception 'FAIL t41: no Barnaby post to report'; end if;
   select public.report_post(v_post, 'inappropriate_post_image', 'not on') into v;
-  if (v->>'report_id') is null then raise exception 'FAIL t39: report_post returned no id'; end if;
-  if (v->>'status') <> 'open' then raise exception 'FAIL t39: status % (want open)', v->>'status'; end if;
+  if (v->>'report_id') is null then raise exception 'FAIL t41: report_post returned no id'; end if;
+  if (v->>'status') <> 'open' then raise exception 'FAIL t41: status % (want open)', v->>'status'; end if;
   select reported_user_id, post_id into v_reported, v_linked
     from public.reports where id = (v->>'report_id')::uuid;
   if v_reported <> '00000000-0000-4000-8000-0000000000b2' then
-    raise exception 'FAIL t39: reported_user_id % is not the post author', v_reported; end if;
-  if v_linked <> v_post then raise exception 'FAIL t39: report not linked to the post'; end if;
-  raise notice 'PASS t39: report_post files against the author and links the post';
+    raise exception 'FAIL t41: reported_user_id % is not the post author', v_reported; end if;
+  if v_linked <> v_post then raise exception 'FAIL t41: report not linked to the post'; end if;
+  raise notice 'PASS t41: report_post files against the author and links the post';
 end $$;
 
 do $$ declare v_own uuid; ok_self boolean := false; ok_hidden boolean := false; begin
   select post_id into v_own from public.feed_page(null, null, 20)
     where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
-  if v_own is null then raise exception 'FAIL t40: no own post to test with'; end if;
+  if v_own is null then raise exception 'FAIL t42: no own post to test with'; end if;
   begin
     perform public.report_post(v_own, 'inappropriate_text', null);
   exception when others then ok_self := true;
@@ -943,9 +943,9 @@ do $$ declare v_own uuid; ok_self boolean := false; ok_hidden boolean := false; 
     perform public.report_post('00000000-0000-4000-8000-00000000dead', 'inappropriate_text', null);
   exception when others then ok_hidden := true;
   end;
-  if not ok_self then raise exception 'FAIL t40: reported own post'; end if;
-  if not ok_hidden then raise exception 'FAIL t40: reported an invisible post'; end if;
-  raise notice 'PASS t40: cannot report your own post or one you cannot see';
+  if not ok_self then raise exception 'FAIL t42: reported own post'; end if;
+  if not ok_hidden then raise exception 'FAIL t42: reported an invisible post'; end if;
+  raise notice 'PASS t42: cannot report your own post or one you cannot see';
 end $$;
 ```
 
@@ -1085,7 +1085,7 @@ grant execute on function public.report_comment(uuid, public.report_category, te
 cd ~/Projects/cheekypint && ./supabase/tests/run_local_pg.sh
 ```
 
-Expected: `PASS t39` and `PASS t40`, and every earlier test still passing.
+Expected: `PASS t41` and `PASS t42`, and every earlier test still passing.
 
 Note: the t37 read of `public.reports` runs as `authenticated` and works as written — `supabase/migrations/20260101000700_rls_policies.sql:74` defines a `reports_select_own` policy, so a reporter can read the rows they filed.
 
