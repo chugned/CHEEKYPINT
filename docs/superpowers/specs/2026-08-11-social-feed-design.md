@@ -55,9 +55,19 @@ notice instead of a celebration — `RESPONSIBLE_DRINKING.md` treats that as a h
 `PourToLogButton` and the `fillToLogSection` are removed, since the tap is now the logging action.
 
 **Duplicate protection.** Today one `idempotencyKey` is generated per sheet presentation, which was
-sufficient when logging happened once per sheet. With tap-to-log the sheet can log repeatedly, so a
-**fresh key is generated per tap** and taps are ignored while `isSaving` is true. Accidental taps
-are further covered by the existing undo banner (`undo_recent_pint_entry`, Home, grace period).
+sufficient when logging happened once per sheet. With tap-to-log the sheet can log repeatedly, so
+the key is scoped **to the beer, not to the tap**: a pending `(beerID, key)` pair is held, reused
+when the same beer is tapped again, replaced when a different beer is tapped, and cleared on
+success. Taps are ignored while `isSaving` is true.
+
+Keying per *tap* would be wrong: `createPint` dedupes on the key (master prompt §7.8), so if a
+request succeeds server-side but its response is dropped, the user sees an error, taps the same beer
+again, and a fresh key creates a **second entry** — inflating the very count `WelfareMonitor` uses
+to decide when to show the welfare notice. Keying per beer keeps a genuine retry deduped while
+letting a different beer log independently.
+
+Accidental taps are further covered by the existing undo banner (`undo_recent_pint_entry`, Home,
+grace period).
 
 This trades §7's "nothing is stored until the user confirms" for "the tap *is* the confirmation,
 and undo is one tap away" — an accepted, deliberate change.

@@ -306,10 +306,16 @@ Delete `servingSection` and `noteSection`, and update `body` so the `Form` conta
         guard !isSaving else { return }
         isSaving = true; errorMessage = nil
         defer { isSaving = false }
-        // A fresh key per tap. One key per sheet presentation was right when the sheet logged
-        // once; now that it can log repeatedly, reusing it would make the second beer look
-        // like a retry of the first and be silently discarded.
-        let key = IdempotencyKey.generate()
+        // The key is scoped to the beer, not the tap. createPint dedupes on it (§7.8), so a
+        // retry of the SAME beer must reuse the key or a dropped response double-logs; a
+        // DIFFERENT beer must get a fresh one or it would return the first beer's entry.
+        let key: String
+        if let pending = pendingKey, pending.beerID == beer.id {
+            key = pending.key
+        } else {
+            key = IdempotencyKey.generate()
+            pendingKey = (beer.id, key)
+        }
         let volume = serving == .custom ? Double(customVolume) : nil
         let cleanNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
@@ -323,6 +329,7 @@ Delete `servingSection` and `noteSection`, and update `body` so the `Form` conta
                 sessionID: nil,
                 note: BeerCatalog.diaryNote(for: beer, userNote: cleanNote)
             )
+            pendingKey = nil
             container.analytics.track(.pintSaved)
             Haptics.success()
             dismiss()
@@ -336,7 +343,15 @@ Delete `servingSection` and `noteSection`, and update `body` so the `Form` conta
     }
 ```
 
-Delete the now-unused `@State private var idempotencyKey = IdempotencyKey.generate()`.
+Replace the sheet-level `@State private var idempotencyKey = IdempotencyKey.generate()` with the
+per-beer pending key:
+
+```swift
+    @State private var pendingKey: (beerID: String, key: String)?
+```
+
+Also update the class doc comment at the top of `LogPintSheet`, which still describes the old
+"one key per sheet, nothing stored until you confirm" design.
 
 - [ ] **Step 9: Build and run the full app suite**
 
