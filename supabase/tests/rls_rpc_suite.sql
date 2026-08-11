@@ -81,6 +81,21 @@ do $$ declare cnt int; kings int; begin
   raise notice 'PASS t16: favourite pubs computed from own entries';
 end $$;
 
+do $$ declare ok boolean := false; begin
+  perform public.send_cheers('00000000-0000-4000-8000-0000000000b2');
+  begin
+    perform public.send_cheers('00000000-0000-4000-8000-0000000000b2');
+  exception when others then ok := true; end;
+  if not ok then raise exception 'FAIL t21: stacked a second unanswered Cheers'; end if;
+  raise notice 'PASS t21: one unanswered Cheers per friend is enforced';
+end $$;
+
+do $$ declare visible int; begin
+  select count(*) into visible from public.cheers;
+  if visible <> 0 then raise exception 'FAIL t22: direct Cheers table exposed % rows', visible; end if;
+  raise notice 'PASS t22: direct Cheers rows are hidden; reads are RPC-only';
+end $$;
+
 -- ============================ BARNABY ============================
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
 
@@ -113,6 +128,17 @@ do $$ declare ok boolean := false; begin
   exception when others then ok := true; end;
   if not ok then raise exception 'FAIL t17: saw Alice''s private favourite pubs'; end if;
   raise notice 'PASS t17: favourite pubs respect favourite_pubs_visibility';
+end $$;
+
+do $$ declare incoming int; remaining int; begin
+  select count(*) into incoming from public.get_received_cheers()
+    where sender_id = '00000000-0000-4000-8000-0000000000a1';
+  if incoming <> 1 then raise exception 'FAIL t23: Barnaby received % Cheers from Alice', incoming; end if;
+  perform public.send_cheers('00000000-0000-4000-8000-0000000000a1');
+  select count(*) into remaining from public.get_received_cheers()
+    where sender_id = '00000000-0000-4000-8000-0000000000a1';
+  if remaining <> 0 then raise exception 'FAIL t23: Cheers back did not acknowledge incoming Cheers'; end if;
+  raise notice 'PASS t23: Cheers back acknowledges incoming and returns a new Cheers';
 end $$;
 
 -- ============================ CERI ============================
@@ -149,8 +175,22 @@ do $$ declare n int; begin
   raise notice 'PASS t20: friendless/blocked user sees only self on leaderboard';
 end $$;
 
+do $$ declare ok boolean := false; begin
+  begin perform public.send_cheers('00000000-0000-4000-8000-0000000000a1');
+  exception when others then ok := true; end;
+  if not ok then raise exception 'FAIL t24: blocked user sent Alice a Cheers'; end if;
+  raise notice 'PASS t24: blocked/non-friend user cannot send Cheers';
+end $$;
+
 -- ============================ TOKEN REVOCATION ============================
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare incoming int; begin
+  select count(*) into incoming from public.get_received_cheers()
+    where sender_id = '00000000-0000-4000-8000-0000000000b2';
+  if incoming <> 1 then raise exception 'FAIL t25: Alice received % returned Cheers', incoming; end if;
+  raise notice 'PASS t25: returned Cheers is visible to its recipient';
+end $$;
+
 do $$ declare t text; begin
   t := public.regenerate_friend_token();
   if t is null or length(t) < 20 then raise exception 'FAIL t18: bad token %', t; end if;

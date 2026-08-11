@@ -1,47 +1,38 @@
 import SwiftUI
 import CheekyPintCore
 
-/// The four primary destinations (master prompt §6). The log button lives on Home as the
-/// visual centre, so it is not a tab. Handles inbound friend/session deep links by presenting
-/// the right sheet.
+/// The deliberately small CheekyPint experience: log beers, see the leaderboard, and manage
+/// settings. Pub discovery, sessions, profiles, and friend-management are not part of this UI.
 struct MainTabView: View {
     @Environment(SessionController.self) private var session
     @State private var selection = 0
-    @State private var friendToken: FriendToken?
-    @State private var sessionToken: FriendToken?
 
     var body: some View {
         TabView(selection: $selection) {
             HomeView()
-                .tabItem { Label("Home", systemImage: "house.fill") }.tag(0)
-            FriendsView()
-                .tabItem { Label("Friends", systemImage: "person.2.fill") }.tag(1)
-            PubsView()
-                .tabItem { Label("Pubs", systemImage: "mappin.and.ellipse") }.tag(2)
-            ProfileView()
-                .tabItem { Label("Profile", systemImage: "person.crop.circle") }.tag(3)
+                .tabItem { Label("Logger", systemImage: "mug.fill") }
+                .tag(0)
+
+            NavigationStack {
+                if let profile = session.currentProfile {
+                    LeaderboardView(profile: profile)
+                }
+            }
+            .tabItem { Label("Leaderboard", systemImage: "trophy.fill") }
+            .tag(1)
+
+            NavigationStack {
+                SettingsView()
+            }
+            .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+            .tag(2)
         }
         .tint(Theme.Palette.accent)
-        .onChange(of: session.pendingDeepLink) { _, _ in routeDeepLink() }
-        .onAppear(perform: routeDeepLink)
-        .sheet(item: $friendToken) { token in
-            NavigationStack { FriendPreviewView(token: token) }
-        }
-        .sheet(item: $sessionToken) { token in
-            NavigationStack { JoinSessionView(token: token) }
-        }
-    }
-
-    private func routeDeepLink() {
-        guard let link = session.consumeDeepLink() else { return }
-        switch link {
-        case .addFriend(let token): friendToken = token
-        case .joinSession(let token): sessionToken = token
-        }
     }
 }
 
-// FriendToken is Identifiable for `.sheet(item:)`.
+// Some legacy friend views remain in the target for source compatibility even though they are
+// no longer reachable from the app shell.
 extension FriendToken: @retroactive Identifiable {
     public var id: String { rawValue }
 }

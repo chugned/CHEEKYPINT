@@ -1,63 +1,95 @@
 import SwiftUI
 import CheekyPintCore
 
-/// A single leaderboard/standings row. Neutral treatment — no medals or "winner" styling
-/// (master prompt §9). Rank is shown as text AND the current user gets a non-colour marker so
-/// rank/status don't rely on colour alone (§21). Private friends show "Private", never a zero.
+enum CheersButtonState {
+    case available
+    case received
+    case sent
+    case sending
+
+    var label: String {
+        switch self {
+        case .available: return "Cheers"
+        case .received: return "Cheers back"
+        case .sent: return "Sent"
+        case .sending: return "Sending"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .sent: return "checkmark"
+        default: return "hands.clap.fill"
+        }
+    }
+}
+
+/// A leaderboard row with explicit gold, silver, and bronze podium styling.
 struct LeaderboardRowView: View {
     let row: LeaderboardRow
     var avatarURL: URL?
-    var activity: FriendBeerActivity?
+    var cheersState: CheersButtonState?
+    var onCheers: (() -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(spacing: Theme.Spacing.md) {
-                rankBadge
-                RemoteAvatar(url: avatarURL, name: row.displayName, size: 40)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(row.displayName)
-                        .font(Theme.Typography.headline)
-                        .foregroundStyle(Theme.Palette.textPrimary)
-                    if row.isCurrentUser {
-                        Text("You").font(Theme.Typography.caption).foregroundStyle(Theme.Palette.textSecondary)
-                    }
-                }
-                Spacer()
-                valueLabel
-            }
-
-            if let activity {
-                VStack(alignment: .leading, spacing: 3) {
-                    Label(activity.nowText, systemImage: "mappin.and.ellipse")
+        HStack(spacing: Theme.Spacing.md) {
+            rankBadge
+            RemoteAvatar(url: avatarURL, name: row.displayName, size: 40)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(row.displayName)
+                    .font(Theme.Typography.headline)
+                    .foregroundStyle(Theme.Palette.textPrimary)
+                if row.isCurrentUser {
+                    Text("You").font(Theme.Typography.caption).foregroundStyle(Theme.Palette.textSecondary)
+                } else if cheersState == .received {
+                    Text("Cheered you")
                         .font(Theme.Typography.caption.weight(.semibold))
                         .foregroundStyle(Theme.Palette.accent)
-                        .lineLimit(2)
-                    if let topPub = activity.topPubs.first {
-                        Label("Top pub: \(topPub.name) (\(topPub.visitCount))", systemImage: "trophy.fill")
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.Palette.textPrimary.opacity(0.86))
-                            .lineLimit(1)
-                    }
-                    ForEach(activity.recentLogs.prefix(3)) { log in
-                        Text(logLine(log))
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.Palette.textSecondary)
-                            .lineLimit(1)
-                    }
                 }
-                .padding(.leading, 28 + 40 + Theme.Spacing.md)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: Theme.Spacing.xxs) {
+                valueLabel
+                cheersButton
             }
         }
         .padding(.vertical, Theme.Spacing.xs)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityText)
+    }
+
+    @ViewBuilder
+    private var cheersButton: some View {
+        if let cheersState, let onCheers {
+            Button(action: onCheers) {
+                Label(cheersState.label, systemImage: cheersState.systemImage)
+            }
+            .font(Theme.Typography.caption.weight(.semibold))
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .tint(cheersState == .received ? Theme.Palette.accent : Theme.Palette.textSecondary)
+            .disabled(cheersState == .sent || cheersState == .sending)
+            .accessibilityHint(cheersState == .received
+                ? "Sends a Cheers back to this friend"
+                : "Sends a Cheers to this friend")
+        }
     }
 
     private var rankBadge: some View {
-        Text(row.rank.map(String.init) ?? "—")
-            .font(Theme.Typography.headline.monospacedDigit())
-            .foregroundStyle(row.isCurrentUser ? Theme.Palette.accent : Theme.Palette.textSecondary)
-            .frame(width: 28, alignment: .center)
+        ZStack {
+            if let rank = row.rank, rank <= 3 {
+                Circle()
+                    .fill(podiumColor(for: rank))
+                    .shadow(color: podiumColor(for: rank).opacity(0.3), radius: 4, y: 2)
+                Image(systemName: rank == 1 ? "crown.fill" : "medal.fill")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(.white)
+            } else {
+                Text(row.rank.map(String.init) ?? "—")
+                    .font(Theme.Typography.headline.monospacedDigit())
+                    .foregroundStyle(row.isCurrentUser ? Theme.Palette.accent : Theme.Palette.textSecondary)
+            }
+        }
+        .frame(width: 34, height: 34)
+        .accessibilityLabel(rankAccessibility)
     }
 
     @ViewBuilder
@@ -75,15 +107,21 @@ struct LeaderboardRowView: View {
         }
     }
 
-    private var accessibilityText: String {
-        let rank = row.rank.map { "Rank \($0)." } ?? ""
-        let who = row.isCurrentUser ? "You, \(row.displayName)." : row.displayName + "."
-        let value = row.isPrivate ? "Private." : "\(Int(row.value ?? 0)) pints recorded."
-        return "\(rank) \(who) \(value)"
+    private var rankAccessibility: String {
+        switch row.rank {
+        case 1: return "King, gold"
+        case 2: return "Second place, silver"
+        case 3: return "Third place, bronze"
+        case let rank?: return "Rank \(rank)"
+        case nil: return "Unranked"
+        }
     }
 
-    private func logLine(_ log: FriendBeerLog) -> String {
-        let pub = log.pubName.map { " at \($0)" } ?? ""
-        return "\(log.beerName)\(pub) - \(log.occurredAt.formatted(date: .omitted, time: .shortened))"
+    private func podiumColor(for rank: Int) -> Color {
+        switch rank {
+        case 1: return Color(red: 0.93, green: 0.63, blue: 0.13)
+        case 2: return Color(red: 0.58, green: 0.62, blue: 0.66)
+        default: return Color(red: 0.67, green: 0.39, blue: 0.18)
+        }
     }
 }

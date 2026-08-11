@@ -32,6 +32,14 @@ actor DemoWorld {
     private var entries: [PintEntry] = []
     private var session: PubSession?
     private var pubs: [UUID: Pub] = [:]
+    private var cheers: [DemoCheers] = []
+
+    private struct DemoCheers {
+        let id: UUID
+        let senderID: UUID
+        let recipientID: UUID
+        let createdAt: Date
+    }
 
     var currentProfile: Profile { profile }
 
@@ -78,6 +86,16 @@ actor DemoWorld {
             entry(60 * 24 * 3, user: Self.ceriID, beer: "Hoegaarden", pub: Self.krugPubID),
             entry(60 * 24 * 8, user: Self.ceriID, beer: "Pilsner Urquell", pub: Self.officePubID),
             entry(60 * 24 * 20, user: Self.ceriID, beer: "Ottakringer Helles", pub: Self.krugPubID),
+        ]
+        // Seed one incoming Cheers so the interaction is immediately visible in demo and
+        // friend-circle mode. Sending it back turns it into an outgoing Cheers.
+        cheers = [
+            DemoCheers(
+                id: UUID(),
+                senderID: Self.barnabyID,
+                recipientID: Self.aliceID,
+                createdAt: now.addingTimeInterval(-8 * 60)
+            )
         ]
     }
 
@@ -226,6 +244,43 @@ actor DemoWorld {
     func favouritePubs() -> [FavouritePubDTO] {
         [FavouritePubDTO(pubId: Self.kingsPubID, name: "The Kings Arms", city: "London",
                          visitCount: 3, lastVisit: Date(), sharedVisitCount: 1)]
+    }
+
+    // MARK: Cheers
+
+    func sendCheers(to recipientID: UUID) throws {
+        guard recipientID == Self.barnabyID || recipientID == Self.ceriID else {
+            throw SupabaseError.forbidden
+        }
+        if cheers.contains(where: {
+            $0.senderID == Self.aliceID && $0.recipientID == recipientID
+        }) {
+            throw SupabaseError.rateLimited(hint: "Cheers already sent — wait for your friend to cheer back.")
+        }
+
+        // A reply acknowledges every incoming Cheers from this friend before sending it back.
+        cheers.removeAll { $0.senderID == recipientID && $0.recipientID == Self.aliceID }
+        cheers.append(DemoCheers(
+            id: UUID(),
+            senderID: Self.aliceID,
+            recipientID: recipientID,
+            createdAt: Date()
+        ))
+    }
+
+    func receivedCheers() -> [CheersDTO] {
+        cheers
+            .filter { $0.recipientID == Self.aliceID }
+            .sorted { $0.createdAt > $1.createdAt }
+            .map { item in
+                CheersDTO(
+                    cheersId: item.id,
+                    senderId: item.senderID,
+                    displayName: item.senderID == Self.barnabyID ? "Barnaby" : "Ceri",
+                    avatarPath: nil,
+                    createdAt: item.createdAt
+                )
+            }
     }
 
     // MARK: Leaderboard (uses the real tested builder)

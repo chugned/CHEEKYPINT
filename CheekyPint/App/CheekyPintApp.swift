@@ -24,15 +24,13 @@ struct CheekyPintApp: App {
         }
     }
 
-    /// Route auth callbacks vs friend/session deep links.
+    /// The custom URL scheme remains only for authentication callbacks.
     @MainActor
     private func handle(_ url: URL) async {
         if url.host == "auth-callback" || url.path.contains("auth-callback") {
             if (try? await container.auth.handleCallbackURL(url)) != nil {
                 await session.didAuthenticate()
             }
-        } else {
-            session.handleDeepLink(url)
         }
     }
 }

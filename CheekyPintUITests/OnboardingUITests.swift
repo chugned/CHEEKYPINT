@@ -21,4 +21,22 @@ final class OnboardingUITests: XCTestCase {
             XCTAssertEqual(ageToggle.value as? String, "0", "Age confirmation must not be pre-checked")
         }
     }
+
+    @MainActor
+    func testCanCheersBackFromLeaderboard() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestDemo"]
+        app.launch()
+
+        let leaderboardTab = app.tabBars.buttons["Leaderboard"]
+        XCTAssertTrue(leaderboardTab.waitForExistence(timeout: 10))
+        leaderboardTab.tap()
+
+        let cheersBack = app.buttons["Cheers back"]
+        XCTAssertTrue(cheersBack.waitForExistence(timeout: 10))
+        cheersBack.tap()
+
+        XCTAssertTrue(app.staticTexts["Cheers sent to Barnaby"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Sent"].exists)
+    }
 }

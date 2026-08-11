@@ -21,14 +21,18 @@ final class SessionController {
     /// persist it against, immediately after sign-in.
     var pendingAgeConfirmed = false
 
-    /// A friend/session deep link captured before we were ready to present it.
-    var pendingDeepLink: DeepLink?
-
     init(container: AppContainer) {
         self.container = container
     }
 
     func bootstrap() async {
+        #if DEBUG
+        // Deterministic entry for UI-test screenshots: boot straight into demo mode.
+        if ProcessInfo.processInfo.arguments.contains("-uiTestDemo") {
+            await enterDemoMode()
+            return
+        }
+        #endif
         if let surname = UserDefaults.standard.string(forKey: surnameKey), !surname.isEmpty {
             await DemoWorld.shared.activate(surname: surname)
             phase = .ready(await DemoWorld.shared.currentProfile)
@@ -96,15 +100,4 @@ final class SessionController {
         }
     }
 
-    // MARK: Deep links
-
-    func handleDeepLink(_ url: URL) {
-        guard let link = container.deepLinkParser.parse(url) else { return }
-        pendingDeepLink = link
-    }
-
-    func consumeDeepLink() -> DeepLink? {
-        defer { pendingDeepLink = nil }
-        return pendingDeepLink
-    }
 }

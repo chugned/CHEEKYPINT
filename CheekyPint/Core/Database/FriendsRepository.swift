@@ -69,4 +69,21 @@ struct FriendsRepository: Sendable {
         if await DemoWorld.shared.isActive { return [] }
         return try await data.rpc("get_blocked_users", params: EmptyBody())
     }
+
+    // MARK: Cheers
+
+    /// Send a Facebook-Poke-style Cheers. Only one unanswered Cheers can be waiting in a
+    /// direction; cheering back acknowledges the incoming one and sends a fresh one back.
+    func sendCheers(to recipientID: UUID) async throws {
+        if await DemoWorld.shared.isActive {
+            try await DemoWorld.shared.sendCheers(to: recipientID)
+            return
+        }
+        try await data.rpcVoid("send_cheers", params: CheersParams(pRecipientId: recipientID))
+    }
+
+    func fetchReceivedCheers() async throws -> [CheersDTO] {
+        if await DemoWorld.shared.isActive { return await DemoWorld.shared.receivedCheers() }
+        return try await data.rpc("get_received_cheers", params: EmptyBody())
+    }
 }

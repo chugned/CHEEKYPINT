@@ -6,7 +6,6 @@ struct StandingsPreview: View {
     @Environment(\.container) private var container
     let rows: [LeaderboardRow]
     let period: LeaderboardPeriod
-    var activities: [UUID: FriendBeerActivity] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
@@ -24,8 +23,7 @@ struct StandingsPreview: View {
                 ForEach(rows) { row in
                     LeaderboardRowView(
                         row: row,
-                        avatarURL: container.avatarURL(for: row.avatarPath),
-                        activity: activities[row.id]
+                        avatarURL: container.avatarURL(for: row.avatarPath)
                     )
                 }
             }
