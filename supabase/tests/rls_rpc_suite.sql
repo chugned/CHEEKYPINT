@@ -1166,6 +1166,17 @@ end $$;
 -- accepted friends from t37b's setup (never undone, unlike the Barnaby–Ceri pair t46 removes),
 -- so no fresh friend request is needed here — sending one would just hit send_friend_request's
 -- "reuse any existing live edge" branch and come back already 'accepted', not 'pending'.
+--
+-- Fix round 2: also hosts his own pub session and sets his own pub preference. Round 1's
+-- pub_sessions/user_pub_preferences fixtures were Alice-only (the seeded session at
+-- seed.sql:82-86 and Alice's own preference above are the ONLY rows in either table), so an
+-- unfiltered read returned nothing different from a correctly-filtered one and the ownership
+-- assertions for those two keys could not fire. create_pub_session() is the real client RPC
+-- for sessions (20260101000850_rpc_pints_sessions.sql) — used here rather than a raw insert.
+-- user_pub_preferences has no dedicated RPC, so this uses a direct insert while running AS
+-- authenticated/Barnaby, which the table's own `user_pub_prefs_all_self` RLS policy
+-- (`user_id = auth.uid()`, 20260101000700_rls_policies.sql) already permits for a client — not
+-- a `reset role` owner-bypass, since a legitimate client-side write path already exists.
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
 do $$ declare v_post uuid; v jsonb; begin
   select post_id into v_post from public.feed_page(null, null, 50)
@@ -1183,7 +1194,13 @@ do $$ declare v_post uuid; v jsonb; begin
 
   perform public.block_user('00000000-0000-4000-8000-0000000000d4');
   perform public.send_nudge('00000000-0000-4000-8000-0000000000a1');
-  raise notice 'PASS t51 setup: Barnaby cheers Alice''s post, mentions then blocks Dev, and Nudges Alice';
+
+  perform public.create_pub_session('00000000-0000-4000-8000-00000000e002', 't51 fixture: barnaby session');
+  insert into public.user_pub_preferences (user_id, pub_id, hidden_from_favourites)
+  values ('00000000-0000-4000-8000-0000000000b2', '00000000-0000-4000-8000-00000000e002', true)
+  on conflict (user_id, pub_id) do update set hidden_from_favourites = true;
+
+  raise notice 'PASS t51 setup: Barnaby cheers Alice''s post, mentions then blocks Dev, Nudges Alice, hosts his own pub session, and sets his own pub preference';
 end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
