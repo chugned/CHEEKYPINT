@@ -1,5 +1,4 @@
 import SwiftUI
-import CryptoKit
 import CheekyPintCore
 
 /// The lightweight confirmation sheet for logging a pint (master prompt §7). A stable
@@ -17,22 +16,16 @@ struct LogPintSheet: View {
     @State private var alcoholFree = false
     @State private var occurredAt = Date()
     @State private var note = ""
-    @State private var selectedBeer = BeerCatalog.beers[0]
     @State private var beerSearch = ""
     @State private var isSaving = false
     @State private var errorMessage: String?
-
-    // Generated once for the lifetime of this sheet — the idempotency guarantee.
-    @State private var idempotencyKey = IdempotencyKey.generate()
+    @State private var showDetails = false
 
     var body: some View {
         NavigationStack {
             Form {
                 beerSection
-                servingSection
                 detailsSection
-                noteSection
-                fillToLogSection
                 if let errorMessage {
                     Text(errorMessage).foregroundStyle(Theme.Palette.warning)
                 }
@@ -52,28 +45,75 @@ struct LogPintSheet: View {
     }
 
     private var beerSection: some View {
-        Section("Beer on display") {
+        Section("Tap a beer to log it") {
             TextField("Search the world's beer fridge", text: $beerSearch)
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                // Lazy: a plain HStack built all 98 cards up front, so every one started its
-                // image request immediately instead of just the handful actually on screen.
-                LazyHStack(spacing: Theme.Spacing.md) {
-                    ForEach(filteredBeers) { beer in
-                        BeerCard(beer: beer, isSelected: beer == selectedBeer) {
-                            selectedBeer = beer
-                        }
-                    }
+            // Form rows are lazy, so all 98 cost nothing until scrolled into view.
+            ForEach(filteredBeers) { beer in
+                BeerRow(beer: beer, isLogging: isSaving) {
+                    Task { await log(beer) }
                 }
-                .padding(.vertical, Theme.Spacing.xs)
             }
-            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-            Text("\(BeerCatalog.beers.count) beers loaded. Every one uses an online bottle or glass photo; generated art only appears if the network image fails.")
-                .font(Theme.Typography.caption)
-                .foregroundStyle(Theme.Palette.textSecondary)
+        }
+    }
+
+    /// Everything that used to be its own section. Collapsed by default so the common case is
+    /// one tap; whatever is set here applies to the next beer tapped.
+    private var detailsSection: some View {
+        Section {
+            DisclosureGroup("Details", isExpanded: $showDetails) {
+                Picker("Size", selection: $serving) {
+                    ForEach(ServingType.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                }
+                if serving == .custom {
+                    TextField("Millilitres", text: $customVolume)
+                        .keyboardType(.numberPad)
+                }
+                Toggle("Alcohol-free", isOn: $alcoholFree)
+                    .tint(Theme.Palette.accent)
+                DatePicker("Time", selection: $occurredAt, in: ...Date(),
+                           displayedComponents: [.date, .hourAndMinute])
+                TextField("Private note, just for you...", text: $note, axis: .vertical)
+                    .lineLimit(1...3)
+            }
+        } footer: {
+            Text("Applies to the next beer you tap.")
+        }
+    }
+
+    private func log(_ beer: BeerChoice) async {
+        guard !isSaving else { return }
+        isSaving = true; errorMessage = nil
+        defer { isSaving = false }
+        // A fresh key per tap. One key per sheet presentation was right when the sheet logged
+        // once; now that it can log repeatedly, reusing it would make the second beer look
+        // like a retry of the first and be silently discarded.
+        let key = IdempotencyKey.generate()
+        let volume = serving == .custom ? Double(customVolume) : nil
+        let cleanNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let entry = try await container.diary.createPint(
+                idempotencyKey: key,
+                occurredAt: occurredAt,
+                serving: serving,
+                volumeMl: volume,
+                alcoholFree: alcoholFree,
+                pubID: nil,
+                sessionID: nil,
+                note: BeerCatalog.diaryNote(for: beer, userNote: cleanNote)
+            )
+            container.analytics.track(.pintSaved)
+            Haptics.success()
+            dismiss()
+            try? await Task.sleep(for: .milliseconds(280))
+            await onLogged(entry)
+        } catch let error as SupabaseError {
+            errorMessage = error.friendlyMessage
+        } catch {
+            errorMessage = "Couldn't save that beer. Please try again."
         }
     }
 
@@ -87,75 +127,6 @@ struct LogPintSheet: View {
                 .contains(query)
         }
     }
-
-    private var servingSection: some View {
-        Section("Serving") {
-            Picker("Size", selection: $serving) {
-                ForEach(ServingType.allCases, id: \.self) { Text($0.displayName).tag($0) }
-            }
-            if serving == .custom {
-                HStack {
-                    TextField("Volume", text: $customVolume).keyboardType(.numberPad)
-                    Text("ml").foregroundStyle(Theme.Palette.textSecondary)
-                }
-            }
-            Toggle("Alcohol-free", isOn: $alcoholFree)
-                .tint(Theme.Palette.accent)
-        }
-    }
-
-    private var detailsSection: some View {
-        Section("When") {
-            DatePicker("Time", selection: $occurredAt, in: ...Date(), displayedComponents: [.date, .hourAndMinute])
-        }
-    }
-
-    private var noteSection: some View {
-        Section("Private note (optional)") {
-            TextField("Just for you...", text: $note, axis: .vertical).lineLimit(1...3)
-        }
-    }
-
-    private var fillToLogSection: some View {
-        Section {
-            PourToLogButton(
-                beer: selectedBeer,
-                isWorking: isSaving
-            ) {
-                Task { await save() }
-            }
-        } footer: {
-            Text("Log it and stand back. The succulence arrives immediately.")
-        }
-    }
-
-    private func save() async {
-        isSaving = true; errorMessage = nil
-        defer { isSaving = false }
-        let volume = serving == .custom ? Double(customVolume) : nil
-        let cleanNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        do {
-            let entry = try await container.diary.createPint(
-                idempotencyKey: idempotencyKey,
-                occurredAt: occurredAt,
-                serving: serving,
-                volumeMl: volume,
-                alcoholFree: alcoholFree,
-                pubID: nil,
-                sessionID: nil,
-                note: BeerCatalog.diaryNote(for: selectedBeer, userNote: cleanNote)
-            )
-            container.analytics.track(.pintSaved)
-            Haptics.success()
-            dismiss()
-            try? await Task.sleep(for: .milliseconds(280))
-            await onLogged(entry)
-        } catch let error as SupabaseError {
-            errorMessage = error.friendlyMessage
-        } catch {
-            errorMessage = "Couldn't save that pint. Please try again."
-        }
-    }
 }
 
 struct BeerChoice: Identifiable, Hashable {
@@ -166,8 +137,6 @@ struct BeerChoice: Identifiable, Hashable {
     let nickname: String
     let glassNote: String
     let roast: String
-    let imageURL: URL?
-    let sourceURL: URL?
 }
 
 enum BeerCatalog {
@@ -179,8 +148,7 @@ enum BeerCatalog {
             style: "Lager",
             nickname: "Graz passport",
             glassNote: "Bright gold in a branded glass with a proper white cap.",
-            roast: "For when somebody says, 'just one' and immediately orders snacks.",
-            file: "Puntigamer_beer.jpg"
+            roast: "For when somebody says, 'just one' and immediately orders snacks."
         ),
         beer(
             "stiegl",
@@ -189,8 +157,7 @@ enum BeerCatalog {
             style: "Lager",
             nickname: "Salzburg diplomat",
             glassNote: "Clear amber-gold, tidy foam, looks like it has weekend plans.",
-            roast: "Polite enough for parents, suspicious enough for the group chat.",
-            file: "Stiegl-bier.jpg"
+            roast: "Polite enough for parents, suspicious enough for the group chat."
         ),
         beer(
             "ottakringer",
@@ -199,8 +166,7 @@ enum BeerCatalog {
             style: "Helles",
             nickname: "Vienna alibi",
             glassNote: "Pale golden helles in a clean glass, bottle standing nearby like a witness.",
-            roast: "The official beverage of 'I am only staying for half an hour.'",
-            file: "Ottakringer_Helles_bottle_with_glass.jpg"
+            roast: "The official beverage of 'I am only staying for half an hour.'"
         ),
         beer(
             "pilsner",
@@ -209,8 +175,7 @@ enum BeerCatalog {
             style: "Pilsner",
             nickname: "Crispy Czech homework",
             glassNote: "Deep gold in a tall glass with dense white foam.",
-            roast: "Ordered by the mate who suddenly becomes a lager professor.",
-            file: "Pilsener_Urquell_hohes_Glas.jpg"
+            roast: "Ordered by the mate who suddenly becomes a lager professor."
         ),
         beer(
             "guinness",
@@ -219,8 +184,7 @@ enum BeerCatalog {
             style: "Stout",
             nickname: "Curtains closed",
             glassNote: "Dark stout body with that creamy beige head doing all the PR.",
-            roast: "Counts as a beer, a meal, and a personality test.",
-            file: "GuinnessPint.jpg"
+            roast: "Counts as a beer, a meal, and a personality test."
         ),
         beer(
             "hoegaarden",
@@ -229,8 +193,7 @@ enum BeerCatalog {
             style: "Witbier",
             nickname: "Cloudy holiday mode",
             glassNote: "Hazy straw beer in a chunky white-beer glass.",
-            roast: "For when your pint wants to wear linen trousers.",
-            file: "HoegaardenGlass.jpg"
+            roast: "For when your pint wants to wear linen trousers."
         ),
         worldBeer("augustiner-helles", "Augustiner Lagerbier Hell", "Germany", "Helles", "Munich homework", "Clear golden lager with a soft white foam cap.", "Quietly judges every other lager at the table."),
         worldBeer("weihenstephaner", "Weihenstephaner Hefeweissbier", "Germany", "Hefeweizen", "Wheat professor", "Cloudy gold with a tall fluffy head in a wheat glass.", "Banana notes, clove notes, lecture notes."),
@@ -347,20 +310,10 @@ enum BeerCatalog {
         style: String,
         nickname: String,
         glassNote: String,
-        roast: String,
-        file: String
+        roast: String
     ) -> BeerChoice {
-        return BeerChoice(
-            id: id,
-            name: name,
-            country: country,
-            style: style,
-            nickname: nickname,
-            glassNote: glassNote,
-            roast: roast,
-            imageURL: commonsImageURL(file),
-            sourceURL: commonsSourceURL(file)
-        )
+        BeerChoice(id: id, name: name, country: country, style: style,
+                   nickname: nickname, glassNote: glassNote, roast: roast)
     }
 
     private static func worldBeer(
@@ -372,380 +325,42 @@ enum BeerCatalog {
         _ glassNote: String,
         _ roast: String
     ) -> BeerChoice {
-        let imageFile = onlineImageFile(for: id, style: style)
-        return BeerChoice(
-            id: id,
-            name: name,
-            country: country,
-            style: style,
-            nickname: nickname,
-            glassNote: glassNote,
-            roast: roast,
-            imageURL: commonsImageURL(imageFile),
-            sourceURL: commonsSourceURL(imageFile)
-        )
-    }
-
-    /// Wikimedia serves thumbnails only at a fixed set of widths — anything else is a hard 400.
-    /// The old `?width=700` was not one of them, so Commons quietly rounded up to the 960px
-    /// bucket (~3x the bytes we need). 500px is the smallest permitted size that still covers the
-    /// 168x126pt card on a 3x screen.
-    private static let thumbnailWidth = 500
-
-    /// Percent-encoding matching Wikimedia's own canonical form: everything outside the unreserved
-    /// set is escaped, including parentheses and non-ASCII, which `.urlPathAllowed` would leave be.
-    private static let thumbnailPathAllowed: CharacterSet = {
-        var set = CharacterSet.alphanumerics
-        set.insert(charactersIn: "-._~")
-        return set
-    }()
-
-    private static func commonsImageURL(_ file: String) -> URL {
-        // `Special:FilePath` costs two 302s (commons.wikimedia.org -> upload.wikimedia.org) on
-        // every image. The thumbnail path is derivable instead: Wikimedia shards by the MD5 of the
-        // underscored filename, so we can address the CDN directly and skip both redirects.
-        let key = file.replacingOccurrences(of: " ", with: "_")
-        let digest = Insecure.MD5.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
-        let encoded = key.addingPercentEncoding(withAllowedCharacters: thumbnailPathAllowed) ?? key
-        let shard = "\(digest.prefix(1))/\(digest.prefix(2))"
-        return URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/\(shard)/\(encoded)/\(thumbnailWidth)px-\(encoded)")!
-    }
-
-    private static func commonsSourceURL(_ file: String) -> URL {
-        let encoded = file.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file
-        return URL(string: "https://commons.wikimedia.org/wiki/File:\(encoded)")!
-    }
-
-    private static func onlineImageFile(for id: String, style: String) -> String {
-        switch id {
-        case "augustiner-helles":
-            return "Augustinerbräu München Lagerbier Hell.jpg"
-        case "weihenstephaner":
-            return "Weihenstephaner Hefeweissbier Alkoholfrei.jpg"
-        case "erdinger":
-            return "Erdinger Weissbier Dunkel.jpg"
-        case "chimay-blue":
-            return "Chimay bleu.jpg"
-        case "tripel-karmeliet":
-            return "Tripel Karmeliet glass.JPG"
-        case "delirium-tremens":
-            return "Delirium tremens glas.jpg"
-        case "windhoek":
-            return "Windhoek-Lager-bottle.jpg"
-        case "quilmes":
-            return "Quilmes beer bottles.jpg"
-        default:
-            return fallbackImageFile(for: style)
-        }
-    }
-
-    private static func fallbackImageFile(for style: String) -> String {
-        let normalized = style.lowercased()
-        if normalized.contains("stout") || normalized.contains("brown") || normalized.contains("dark") {
-            return "GuinnessPint.jpg"
-        }
-        if normalized.contains("wheat") || normalized.contains("wit") || normalized.contains("radler") {
-            return "HoegaardenGlass.jpg"
-        }
-        if normalized.contains("ipa")
-            || normalized.contains("ale")
-            || normalized.contains("bitter")
-            || normalized.contains("amber")
-            || normalized.contains("cream") {
-            return "Tripel Karmeliet glass.JPG"
-        }
-        if normalized.contains("hell") {
-            return "Helles_im_Glas-Helles_(pale_beer).jpg"
-        }
-        return "Pilsener_Urquell_hohes_Glas.jpg"
+        BeerChoice(id: id, name: name, country: country, style: style,
+                   nickname: nickname, glassNote: glassNote, roast: roast)
     }
 }
 
-private struct BeerCard: View {
+/// A single tappable catalog row. The tap is the logging action, so the whole row is a hit
+/// target and the label reads as a verb.
+private struct BeerRow: View {
     let beer: BeerChoice
-    let isSelected: Bool
+    let isLogging: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                beerImage
-                .frame(width: 168, height: 126)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous))
-
-                Text(beer.name)
-                    .font(Theme.Typography.headline)
-                    .foregroundStyle(Theme.Palette.textPrimary)
-                    .lineLimit(1)
-                Text(beer.nickname)
-                    .font(Theme.Typography.caption.weight(.semibold))
-                    .foregroundStyle(Theme.Palette.accent)
-                    .lineLimit(1)
-                Text("\(beer.country) - \(beer.style)")
-                    .font(Theme.Typography.caption)
-                    .foregroundStyle(Theme.Palette.textSecondary)
-                    .lineLimit(1)
-                Text(beer.glassNote)
-                    .font(Theme.Typography.caption)
-                    .foregroundStyle(Theme.Palette.textSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(beer.roast)
-                    .font(Theme.Typography.caption)
-                    .foregroundStyle(Theme.Palette.textPrimary.opacity(0.85))
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(width: 168, height: 282, alignment: .topLeading)
-            .padding(Theme.Spacing.sm)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                    .fill(Theme.Palette.backgroundPrimary)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                    .stroke(isSelected ? Theme.Palette.accent : Theme.Palette.textSecondary.opacity(0.22),
-                            lineWidth: isSelected ? 3 : 1)
-            )
-        }
-        .buttonStyle(.plain)
-            .accessibilityLabel("\(beer.name), \(beer.glassNote)")
-    }
-
-    @ViewBuilder
-    private var beerImage: some View {
-        if let imageURL = beer.imageURL {
-            RemoteImage(url: imageURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                case .failure:
-                    fallbackImage
-                case .loading:
-                    ZStack {
-                        Theme.Palette.backgroundSecondary
-                        ProgressView().tint(Theme.Palette.accent)
-                    }
-                }
-            }
-        } else {
-            fallbackImage
-        }
-    }
-
-    private var fallbackImage: some View {
-        GeneratedBeerArtwork(beer: beer)
-    }
-}
-
-private struct GeneratedBeerArtwork: View {
-    let beer: BeerChoice
-
-    var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [palette.background.opacity(0.94), Theme.Palette.backgroundSecondary],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            VStack(spacing: Theme.Spacing.xs) {
-                HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
-                    package
-                    PintGlass(fill: fillLevel, edge: Theme.Palette.textPrimary)
-                        .frame(width: 42, height: 76)
-                        .shadow(color: palette.beer.opacity(0.32), radius: 8, y: 4)
-                }
-                .frame(maxWidth: .infinity)
-
-                VStack(spacing: 1) {
+            HStack(spacing: Theme.Spacing.sm) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(beer.name)
-                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                        .font(Theme.Typography.headline)
                         .foregroundStyle(Theme.Palette.textPrimary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.68)
-                    Text(beer.country.uppercased())
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                    Text("\(beer.country) · \(beer.style)")
+                        .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.Palette.textSecondary)
                         .lineLimit(1)
                 }
-            }
-            .padding(Theme.Spacing.sm)
-        }
-    }
-
-    @ViewBuilder
-    private var package: some View {
-        if beer.style.lowercased().contains("ipa") || beer.name.lowercased().contains("light") {
-            can
-        } else {
-            bottle
-        }
-    }
-
-    private var bottle: some View {
-        ZStack(alignment: .bottom) {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(palette.package)
-                .frame(width: 36, height: 74)
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(palette.package)
-                .frame(width: 18, height: 98)
-            Capsule()
-                .fill(palette.cap)
-                .frame(width: 20, height: 7)
-                .offset(y: -92)
-            label
-                .frame(width: 32, height: 34)
-                .offset(y: -11)
-        }
-        .frame(width: 44, height: 102)
-        .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
-    }
-
-    private var can: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(palette.package)
-            VStack(spacing: 0) {
-                Capsule().fill(.white.opacity(0.45)).frame(height: 4)
-                Spacer()
-                Capsule().fill(.black.opacity(0.18)).frame(height: 4)
-            }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 5)
-            label
-                .frame(width: 40, height: 42)
-        }
-        .frame(width: 48, height: 94)
-        .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
-    }
-
-    private var label: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(.white.opacity(0.88))
-            VStack(spacing: 1) {
-                Text(monogram)
-                    .font(.system(size: 13, weight: .black, design: .rounded))
-                    .foregroundStyle(palette.package)
-                    .lineLimit(1)
-                Rectangle()
-                    .fill(palette.beer.opacity(0.8))
-                    .frame(height: 2)
-                Text(shortStyle)
-                    .font(.system(size: 5.5, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.58))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
-            }
-            .padding(4)
-        }
-    }
-
-    private var monogram: String {
-        let words = beer.name
-            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-            .prefix(2)
-        let letters = words.compactMap(\.first).map(String.init).joined()
-        return letters.isEmpty ? "CP" : letters.uppercased()
-    }
-
-    private var shortStyle: String {
-        beer.style.uppercased()
-    }
-
-    private var fillLevel: CGFloat {
-        switch beer.style.lowercased() {
-        case let style where style.contains("stout") || style.contains("brown"):
-            return 0.92
-        case let style where style.contains("wheat") || style.contains("wit"):
-            return 0.76
-        case let style where style.contains("ipa") || style.contains("ale"):
-            return 0.84
-        default:
-            return 0.78
-        }
-    }
-
-    private var palette: ArtworkPalette {
-        ArtworkPalette(beer: beer)
-    }
-}
-
-private struct ArtworkPalette {
-    let background: Color
-    let package: Color
-    let beer: Color
-    let cap: Color
-
-    init(beer: BeerChoice) {
-        let style = beer.style.lowercased()
-        let seed = abs(beer.id.hashValue)
-        let accent = Self.accent(seed: seed)
-        self.background = accent.opacity(0.2)
-        self.package = accent
-        self.cap = Color.white.opacity(0.82)
-
-        switch style {
-        case let value where value.contains("stout") || value.contains("brown"):
-            self.beer = Color(red: 0.18, green: 0.10, blue: 0.06)
-        case let value where value.contains("red") || value.contains("amber") || value.contains("bitter"):
-            self.beer = Color(red: 0.72, green: 0.32, blue: 0.13)
-        case let value where value.contains("wheat") || value.contains("wit"):
-            self.beer = Color(red: 0.95, green: 0.76, blue: 0.32)
-        case let value where value.contains("ipa") || value.contains("ale"):
-            self.beer = Color(red: 0.86, green: 0.49, blue: 0.16)
-        default:
-            self.beer = Theme.Palette.beer
-        }
-    }
-
-    private static func accent(seed: Int) -> Color {
-        let palette = [
-            Color(red: 0.11, green: 0.43, blue: 0.36),
-            Color(red: 0.55, green: 0.18, blue: 0.16),
-            Color(red: 0.18, green: 0.31, blue: 0.55),
-            Color(red: 0.42, green: 0.28, blue: 0.13),
-            Color(red: 0.35, green: 0.20, blue: 0.49),
-            Color(red: 0.56, green: 0.38, blue: 0.08),
-            Color(red: 0.12, green: 0.38, blue: 0.52),
-        ]
-        return palette[seed % palette.count]
-    }
-}
-
-private struct PourToLogButton: View {
-    let beer: BeerChoice
-    let isWorking: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: Theme.Spacing.md) {
-                PintGlass(fill: 0.86, edge: Theme.Palette.textPrimary)
-                    .frame(width: 58, height: 84)
-                    .shadow(color: Theme.Palette.beer.opacity(0.25), radius: 10, y: 4)
-                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                    Text(isWorking ? "Logging..." : "Log beer")
-                        .font(Theme.Typography.headline.weight(.bold))
-                        .foregroundStyle(Theme.Palette.textPrimary)
-                    Text(beer.name)
-                        .font(Theme.Typography.callout)
-                        .foregroundStyle(Theme.Palette.textSecondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Image(systemName: isWorking ? "hourglass" : "plus.circle.fill")
+                Spacer(minLength: Theme.Spacing.xs)
+                Image(systemName: "plus.circle.fill")
                     .font(.title3)
                     .foregroundStyle(Theme.Palette.accent)
             }
-            .padding(.vertical, Theme.Spacing.xs)
+            .frame(minHeight: Theme.minTapTarget)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(isWorking)
+        .disabled(isLogging)
         .accessibilityLabel("Log \(beer.name)")
+        .accessibilityHint("\(beer.country), \(beer.style)")
     }
 }

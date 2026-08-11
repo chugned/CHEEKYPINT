@@ -39,11 +39,11 @@ The current catalog starts with image-backed beers:
 
 It then adds a larger international list covering common lagers, pilsners, wheat beers, stouts,
 IPAs, ales, and house-beer fallbacks from Europe, Asia, the Americas, Africa, and Oceania.
-Image-backed beers load from Wikimedia Commons via `Special:FilePath` URLs in
-`LogPintSheet.swift`. Every current catalog beer now gets an online bottle-or-glass photo URL;
-brand-specific Commons files are used where available, with style-matched Wikimedia beer photos
-as the fallback. Generated artwork is only kept as the offline/error fallback if a remote image
-cannot load.
+The catalog is text-only. Beer photos were removed: the Wikimedia Commons images previously used
+required visible attribution under CC BY-SA / CC BY (12 of the 15 distinct files), several were
+photographs of live commercial brands, and hot-linking Commons breaches their robot policy. Tapping
+a row logs that beer immediately; serving size, alcohol-free, time and a private note live behind
+the collapsed `Details` disclosure.
 
 ## Build And Install
 
