@@ -599,7 +599,11 @@ Append to `supabase/tests/rls_rpc_suite.sql`:
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 
 do $$ declare v_post uuid; v jsonb; begin
-  select post_id into v_post from public.feed_page(null, null, 20) limit 1;
+  -- Filter by author: Task 3's t34c seeded Ceri-owned posts, so an unfiltered limit 1 is
+  -- no longer deterministic under Alice's identity.
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
+  if v_post is null then raise exception 'FAIL: no Alice post available'; end if;
   select public.toggle_post_cheers(v_post) into v;
   if (v->>'cheered')::boolean is not true then raise exception 'FAIL t35: first toggle did not cheer'; end if;
   if (v->>'cheers_count')::int <> 1 then raise exception 'FAIL t35: count % (want 1)', v->>'cheers_count'; end if;
@@ -610,7 +614,11 @@ do $$ declare v_post uuid; v jsonb; begin
 end $$;
 
 do $$ declare v_post uuid; v jsonb; v_body text; v_mentions uuid[]; begin
-  select post_id into v_post from public.feed_page(null, null, 20) limit 1;
+  -- Filter by author: Task 3's t34c seeded Ceri-owned posts, so an unfiltered limit 1 is
+  -- no longer deterministic under Alice's identity.
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
+  if v_post is null then raise exception 'FAIL: no Alice post available'; end if;
   select public.add_comment(v_post, 'nice one' || chr(8203) || '!',
                             array['00000000-0000-4000-8000-0000000000b2'::uuid]) into v;
   if (v->>'comment_id') is null then raise exception 'FAIL t36: add_comment returned no id'; end if;
@@ -624,7 +632,11 @@ end $$;
 
 -- Dev is blocked by Alice, so he is not a mentionable friend.
 do $$ declare v_post uuid; ok boolean := false; begin
-  select post_id into v_post from public.feed_page(null, null, 20) limit 1;
+  -- Filter by author: Task 3's t34c seeded Ceri-owned posts, so an unfiltered limit 1 is
+  -- no longer deterministic under Alice's identity.
+  select post_id into v_post from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000a1' limit 1;
+  if v_post is null then raise exception 'FAIL: no Alice post available'; end if;
   if v_post is null then raise exception 'FAIL t37: no post to comment on'; end if;
   begin
     perform public.add_comment(v_post, 'hi', array['00000000-0000-4000-8000-0000000000d4'::uuid]);
