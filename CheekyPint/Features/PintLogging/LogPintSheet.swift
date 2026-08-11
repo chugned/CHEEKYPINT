@@ -1,10 +1,29 @@
 import SwiftUI
 import CheekyPintCore
 
-/// The lightweight confirmation sheet for logging a pint (master prompt §7). A stable
-/// idempotency key is generated once when the sheet opens and reused on every retry, so a
-/// double-tap or a flaky network can't create duplicates. Submission is disabled while in
-/// flight. Nothing is stored until the user confirms.
+/// The retry-safety rule behind `LogPintSheet.log(_:)`, pulled out to a pure function so it can be
+/// unit tested without the view's `@Environment(\.container)` / `@Environment(\.dismiss)`
+/// dependencies. Reuses `pending`'s key when it belongs to the *same* beer — a genuine retry the
+/// server should dedupe — otherwise mints a fresh key via `generate` for a new pending attempt.
+func resolveIdempotencyKey(
+    for beerID: String,
+    pending: (beerID: String, key: String)?,
+    generate: () -> String
+) -> (key: String, pending: (beerID: String, key: String)) {
+    if let pending, pending.beerID == beerID {
+        return (pending.key, pending)
+    }
+    let key = generate()
+    return (key, (beerID: beerID, key: key))
+}
+
+/// The tap-to-log sheet for a pint (master prompt §7). Tapping a beer row logs it immediately —
+/// there is no separate confirm step. Idempotency is tracked per pending attempt, not per sheet:
+/// the first tap on a beer generates a fresh key; if that save fails and the *same* beer is tapped
+/// again, the retry reuses that same key so the server's dedupe RPC returns the existing entry
+/// instead of creating a second one. The key is cleared once that beer's save succeeds, and a tap
+/// on a *different* beer always gets its own fresh key. `isSaving` blocks re-entrant taps while a
+/// request is in flight.
 struct LogPintSheet: View {
     let onLogged: (PintEntry) async -> Void
 
@@ -20,6 +39,10 @@ struct LogPintSheet: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var showDetails = false
+
+    // Keyed by beer, not by sheet lifetime: a failed save leaves this set so a retry tap on the
+    // *same* beer reuses the key (server dedupes it); a tap on a different beer gets a fresh one.
+    @State private var pendingKey: (beerID: String, key: String)?
 
     var body: some View {
         NavigationStack {
@@ -88,10 +111,15 @@ struct LogPintSheet: View {
         guard !isSaving else { return }
         isSaving = true; errorMessage = nil
         defer { isSaving = false }
-        // A fresh key per tap. One key per sheet presentation was right when the sheet logged
-        // once; now that it can log repeatedly, reusing it would make the second beer look
-        // like a retry of the first and be silently discarded.
-        let key = IdempotencyKey.generate()
+        // Reuse the pending key only when this is a retry of the *same* beer — the server's
+        // idempotent RPC recognises the repeated key and returns the existing entry instead of
+        // creating a duplicate. Any other beer (first attempt, or a different beer entirely)
+        // gets a fresh key. See `resolveIdempotencyKey` for the (unit-tested) rule itself.
+        let (rawKey, newPending) = resolveIdempotencyKey(for: beer.id, pending: pendingKey) {
+            IdempotencyKey.generate().rawValue
+        }
+        pendingKey = newPending
+        let key = IdempotencyKey(rawValue: rawKey)
         let volume = serving == .custom ? Double(customVolume) : nil
         let cleanNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
@@ -105,6 +133,7 @@ struct LogPintSheet: View {
                 sessionID: nil,
                 note: BeerCatalog.diaryNote(for: beer, userNote: cleanNote)
             )
+            pendingKey = nil
             container.analytics.track(.pintSaved)
             Haptics.success()
             dismiss()
