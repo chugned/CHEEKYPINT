@@ -923,6 +923,92 @@ end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 
+-- ============================ STORAGE: private post photos ============================
+-- The suite's shim gives storage.objects RLS but no policies, so these assertions exercise the
+-- policy we are about to add. Rows are inserted with the service role (reset role) because the
+-- shim grants no INSERT policy on storage.objects.
+reset role;
+insert into storage.objects (bucket_id, name)
+values ('post-images', '00000000-0000-4000-8000-0000000000b2/barnaby-pint.jpg')
+on conflict do nothing;
+
+-- Give Barnaby a post that references it so the policy has something to join to.
+set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
+
+-- t44 (above) made Ceri and Barnaby accepted friends so she could legitimately comment on his
+-- post for the comment_count check, and nothing since has undone it. This test needs Ceri back to
+-- her original "Alice's friend, NOT Barnaby's" seed relationship to exercise the non-friend
+-- denial below — without this, the negative assertion would be testing an accepted friend and
+-- would pass for the wrong reason (or, as currently written, fail outright).
+do $$ begin
+  perform public.remove_friend('00000000-0000-4000-8000-0000000000c3');
+  raise notice 'PASS t46 setup: Barnaby and Ceri''s t44 friendship is undone so Ceri is a non-friend again';
+end $$;
+
+do $$ begin
+  perform public.create_post('storage policy fixture', '00000000-0000-4000-8000-0000000000b2/barnaby-pint.jpg', null, null);
+end $$;
+
+do $$ declare v_bucket_public boolean; visible int; begin
+  select public.bucket_is_public('post-images') into v_bucket_public;
+  if v_bucket_public is distinct from false then
+    raise exception 'FAIL t46: post-images bucket is still public'; end if;
+
+  -- Author sees their own object.
+  select count(*) into visible from storage.objects
+   where bucket_id = 'post-images' and name like '00000000-0000-4000-8000-0000000000b2/%';
+  if visible is distinct from 1 then
+    raise exception 'FAIL t46: author sees % of own objects (want 1)', visible; end if;
+  raise notice 'PASS t46: the bucket is private and the author can read their own photo';
+end $$;
+
+-- Alice is Barnaby's accepted friend -> may read.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare visible int; begin
+  select count(*) into visible from storage.objects
+   where bucket_id = 'post-images' and name like '00000000-0000-4000-8000-0000000000b2/%';
+  if visible is distinct from 1 then
+    raise exception 'FAIL t46: friend sees % (want 1)', visible; end if;
+  raise notice 'PASS t46: an accepted friend can read the photo';
+end $$;
+
+-- Ceri is Alice's friend but NOT Barnaby's -> must not read.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000c3';
+do $$ declare visible int; begin
+  select count(*) into visible from storage.objects
+   where bucket_id = 'post-images' and name like '00000000-0000-4000-8000-0000000000b2/%';
+  if visible is distinct from 0 then
+    raise exception 'FAIL t46: non-friend sees % objects (want 0)', visible; end if;
+  raise notice 'PASS t46: a non-friend cannot read the photo';
+end $$;
+
+-- Revocation: the whole point of going private is that deleting the post revokes access to the
+-- photo immediately, not just "post deletion no longer matters because the URL was already
+-- public." Barnaby soft-deletes his post; Alice, who could read the photo a moment ago as an
+-- accepted friend, must now see zero objects. Nothing else exercises the policy's
+-- `p.deleted_at is null` clause.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
+do $$ declare v_post uuid; begin
+  -- public.posts is RLS-enabled with no policies (see the migration's can_read_post_image
+  -- comment) — a direct select here would return nothing even for Barnaby himself. feed_page is
+  -- the security-definer path every other test in this suite already uses to fetch a post id.
+  select post_id into v_post from public.feed_page(null, null, 20)
+   where author_id = '00000000-0000-4000-8000-0000000000b2'
+     and image_path = '00000000-0000-4000-8000-0000000000b2/barnaby-pint.jpg';
+  if v_post is null then raise exception 'FAIL t46: storage fixture post not found to delete'; end if;
+  perform public.delete_post(v_post);
+  raise notice 'PASS t46 setup: Barnaby deletes the fixture post';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare visible int; begin
+  select count(*) into visible from storage.objects
+   where bucket_id = 'post-images' and name like '00000000-0000-4000-8000-0000000000b2/%';
+  if visible is distinct from 0 then
+    raise exception 'FAIL t46: friend still sees % objects after the post was deleted (want 0)', visible; end if;
+  raise notice 'PASS t46: deleting the post immediately revokes the friend''s access to the photo';
+end $$;
+
 reset role;
 \echo '-------------------------------------------'
 \echo 'ALL RLS/RPC CHECKS PASSED'
