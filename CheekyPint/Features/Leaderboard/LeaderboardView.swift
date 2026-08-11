@@ -66,7 +66,7 @@ struct LeaderboardView: View {
                 }
 
                 if let nudgeConfirmation {
-                    Label(nudgeConfirmation, systemImage: "hands.clap.fill")
+                    Label(nudgeConfirmation, systemImage: "hand.wave.fill")
                         .font(Theme.Typography.callout.weight(.semibold))
                         .foregroundStyle(Theme.Palette.accent)
                         .listRowBackground(Theme.Palette.backgroundSecondary)
@@ -102,7 +102,8 @@ struct LeaderboardView: View {
             )
             async let incomingNudges = container.friends.fetchReceivedNudges()
             rows = try await leaderboardRows
-            let incoming = try await incomingNudges
+            // Non-fatal: a nudge-fetch failure shouldn't blank standings that already loaded.
+            let incoming = (try? await incomingNudges) ?? []
             receivedNudges = Dictionary(uniqueKeysWithValues: incoming.map { ($0.senderId, $0) })
             sentNudges.subtract(receivedNudges.keys)
         } catch let e as SupabaseError {

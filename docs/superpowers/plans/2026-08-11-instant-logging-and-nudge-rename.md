@@ -19,7 +19,7 @@
 - **`WelfareMonitor.PintFeedbackTone.cheers` and `WelfareMonitor.cheersMessage` must NOT be renamed.** They are the post-log confirmation copy ("Pint logged. Cheers."), unrelated to the nudge. This also means `HomeViewModel.swift`, `corecheck/main.swift`, `WelfareMonitor.swift` and `SafetyAndTotalsTests.swift` match a grep for "cheers" but are out of scope.
 - The alcohol-free toggle must survive. `WelfareMonitor` counts *alcoholic* entries to decide when to show the welfare notice; `docs/RESPONSIBLE_DRINKING.md` treats this as a hard product requirement.
 - No new third-party dependencies. The app ships with zero.
-- Existing suites must stay green after every task: **54 `CheekyPintCore` tests** and **8 app tests**.
+- Existing suites must stay green after every task: **54 `CheekyPintCore` tests** and **11 app tests** (3 `AppSmokeTests` + 4 `BeerCatalogTests` + 4 `IdempotencyKeyRetryTests`).
 - Work happens on branch `feat/instant-log-nudge`, cut from a clean tree (baseline commit `c18dfb1`). Commit at the end of each task as the steps instruct. Never commit on `master`, and never amend or rebase existing commits.
 
 ---
@@ -364,7 +364,7 @@ xcodebuild test -project CheekyPint.xcodeproj -scheme CheekyPint \
   -only-testing:CheekyPintTests 2>&1 | grep -E "Executed|error:|BUILD"
 ```
 
-Expected: build succeeds, `Executed 7 tests, with 0 failures` (3 pre-existing `AppSmokeTests` + 4 new `BeerCatalogTests`).
+Expected: build succeeds, `Executed 11 tests, with 0 failures` (3 pre-existing `AppSmokeTests` + 4 `BeerCatalogTests` + 4 `IdempotencyKeyRetryTests`).
 
 - [ ] **Step 10: Verify on the simulator**
 

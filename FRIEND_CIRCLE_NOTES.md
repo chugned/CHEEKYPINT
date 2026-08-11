@@ -7,9 +7,10 @@ This build is tuned for a private friend group rather than public auth.
 - Entry is surname-only. No Apple sign-in, email OTP, or third-party login UI.
 - The surname is stored locally on the phone and used as the local profile name.
 - The main pint action is now a beer glass image that fills as pints are recorded.
-- The logging sheet shows beers on display with remote glass photos and short descriptions.
+- The logging sheet shows the beer catalog as a searchable list of tappable rows (name, country,
+  style); no beer photos are shown.
 - The beer picker has a searchable world-style catalog with country/style metadata.
-- Tapping `Log beer` saves immediately, then beer overflows the whole screen from all sides.
+- Tapping a beer row logs it immediately, then beer overflows the whole screen from all sides.
 - The full-screen celebration says `+1 succulence`.
 - The saved private note includes the selected beer name, so the confirmation can call it out.
 - The Pubs tab includes a live pub map based on current location, using on-demand When-In-Use
@@ -28,7 +29,7 @@ This build is tuned for a private friend group rather than public auth.
 
 ## Beer Display
 
-The current catalog starts with image-backed beers:
+The current catalog starts with:
 
 - Puntigamer
 - Stiegl

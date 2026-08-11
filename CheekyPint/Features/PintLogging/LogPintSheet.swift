@@ -47,11 +47,11 @@ struct LogPintSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                beerSection
-                detailsSection
                 if let errorMessage {
                     Text(errorMessage).foregroundStyle(Theme.Palette.warning)
                 }
+                detailsSection
+                beerSection
             }
             .scrollContentBackground(.hidden)
             .background(Theme.Palette.backgroundPrimary)

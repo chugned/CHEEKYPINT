@@ -19,7 +19,7 @@ enum NudgeButtonState {
     var systemImage: String {
         switch self {
         case .sent: return "checkmark"
-        default: return "hands.clap.fill"
+        default: return "hand.wave.fill"
         }
     }
 }
