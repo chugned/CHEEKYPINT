@@ -5,6 +5,17 @@
 --
 -- Order matters: enqueue the storage object BEFORE deleting the row, because the row holds the
 -- only copy of image_path.
+--
+-- Deliberate cascade: post_cheers.post_id and post_comments.post_id are both
+-- `references public.posts (id) on delete cascade` (20260811000100_feed_tables.sql:59,70). When
+-- this function hard-deletes an aged, soft-deleted post, that FK silently takes every comment and
+-- cheer on it with it — including a comment from a user who never soft-deleted anything and whose
+-- content has no retention clock of its own (e.g. B comments on A's post; A soft-deletes the post;
+-- B's untouched comment is destroyed 30 days later when this function purges A's post row). This
+-- is intended, not an oversight: a comment or cheer has no meaning or surface to appear on once
+-- its post is gone, so it is treated as part of the post rather than independently retained. It IS
+-- another user's personal data being erased as a side effect of someone else's action, which is
+-- why it is documented here and in docs/legal/DATA_RETENTION_POLICY.md rather than left implicit.
 
 create or replace function public.purge_soft_deleted_posts(p_older_than interval default interval '30 days')
 returns int

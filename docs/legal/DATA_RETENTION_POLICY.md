@@ -14,12 +14,22 @@ the service safe.
 |------|-----------|
 | Account + profile | While the account is active |
 | Pint entries / pub visits | While active; soft-deleted immediately on undo/deletion, purged within [[30]] days |
+| Post bodies / photos | While active; soft-deleted immediately on author deletion, purged within 30 days (`purge_soft_deleted_posts`); the photo is queued for storage removal at the same time |
+| Comments / reactions on posts | Comments: while active; soft-deleted immediately on author deletion, purged within 30 days (`purge_soft_deleted_comments`). Reactions (cheers) have no independent soft-delete — see note below |
 | Friends / blocks | While active or until removed/unblocked |
-| Reports (moderation) | [[12–24 months]] after resolution, for safety and audit |
+| Reports (moderation) | [[12–24 months]] after resolution, for safety and audit (`purge_resolved_reports`, defaults to 18 months) |
 | Rate-limit events | Rolling [[2 days]] (pruned automatically) |
 | Analytics events (if enabled) | Aggregated/identifier-free; [[14 months]] |
 | Backups | Rolling [[7–30]] days, then overwritten |
 | Auth logs | Per Supabase configuration ([[window]]) |
+
+**Note on comments and reactions:** deleting a post also removes the comments and reactions
+(cheers) other people left on it. This is deliberate — a comment or reaction has no meaning or
+place to appear once its post is gone. It happens at purge time, not at the moment of deletion:
+soft-deleting a post only hides it; the comments and reactions on it are removed later, together
+with the post itself, when the post's own 30-day purge runs. A comment made on a post before that
+post was soft-deleted is removed this way even though the comment itself was never soft-deleted
+and was not independently due for deletion.
 
 ## On account deletion
 

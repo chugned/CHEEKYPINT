@@ -8,7 +8,7 @@
 - [ ] Configure Auth: enable Sign in with Apple (Services ID, key, team id) + email OTP; set
       Site URL + redirect URLs (`cheekypint://auth-callback`, `https://cheekypint.app/auth-callback`)
 - [ ] Create the `avatars` storage bucket (migration does this) and confirm policies
-- [ ] Schedule `prune_rate_limit_events` (daily) and any leaderboard cache jobs if added
+- [ ] Schedule any leaderboard cache jobs if added
 - [ ] Schedule the retention jobs `docs/legal/DATA_RETENTION_POLICY.md` commits to — without
       these running, that document is aspirational, not enforced:
       - `prune_rate_limit_events` — daily
