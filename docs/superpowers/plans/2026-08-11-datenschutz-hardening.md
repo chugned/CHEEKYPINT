@@ -396,7 +396,7 @@ end $$;
 
 - [ ] **Step 2: Run the suite to verify it fails**
 
-Expected: FAIL — `FAIL t48` (nothing queued) or a missing-function error.
+Expected: FAIL — `FAIL t49` (nothing queued) or a missing-function error.
 
 - [ ] **Step 3: Make `delete_post` enqueue its photo**
 
