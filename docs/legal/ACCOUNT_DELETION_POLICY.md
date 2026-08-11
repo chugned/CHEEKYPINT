@@ -18,8 +18,10 @@ confirm, and may ask you to re-authenticate.
 3. Your pint diary and pub visits are soft-deleted and then purged per the
    [Data Retention Policy](DATA_RETENTION_POLICY.md).
 4. Your profile photo and any photos on your posts are removed from storage and your
-   authentication account is deleted (this cascade is completed by the `delete-account` Edge
-   Function using the service role).
+   authentication account is deleted — completed by the `delete-account` Edge Function, which the
+   app calls using the service role. This removes the files at those storage paths; it cannot
+   recall a photo URL you or someone else already copied, screenshotted, or shared elsewhere
+   before deletion.
 5. You are signed out and shown a confirmation.
 
 ## What may remain

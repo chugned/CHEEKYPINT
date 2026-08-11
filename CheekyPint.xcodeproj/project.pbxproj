@@ -60,6 +60,7 @@
 		A46C8F427C3284A54D3C7C21 /* PintPourView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22111C12A6569AAF398C360B /* PintPourView.swift */; };
 		A9D2045D746CF4F4E495DF93 /* LegalDocumentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FE2EBAF2631120634D10BD9 /* LegalDocumentView.swift */; };
 		AAD1081504F7466674B9481D /* ReportUserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE5D8680C57253489F8ED93F /* ReportUserView.swift */; };
+		AC2CCC69E150D6A237283A4A /* DeleteAccountWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3790C1282D2C4B39809DB396 /* DeleteAccountWiringTests.swift */; };
 		AEDFC5D78379A7892E004150 /* PrivacyChoicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 400FCC410C9213C6AA6E9B1B /* PrivacyChoicesView.swift */; };
 		B7C2E9813A10407284B257F3 /* SupabaseAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7273023994D1632D9EE2E815 /* SupabaseAuth.swift */; };
 		BFBA9EEAAF2CBF212725A4CF /* EditProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A28C4771ADDE62DBDEE18120 /* EditProfileView.swift */; };
@@ -121,6 +122,7 @@
 		28E880C268F01EA897CD5EFD /* BlockedUsersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockedUsersView.swift; sourceTree = "<group>"; };
 		2987B3D4DDA4F56D9EB3B8A3 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		2FDC7B74515EEEC1AA3295CF /* DemoWorld.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWorld.swift; sourceTree = "<group>"; };
+		3790C1282D2C4B39809DB396 /* DeleteAccountWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteAccountWiringTests.swift; sourceTree = "<group>"; };
 		3872330003B170A384111360 /* PintGlass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PintGlass.swift; sourceTree = "<group>"; };
 		3FA2BCD1FC71F9B892EAA2C4 /* PubPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PubPickerView.swift; sourceTree = "<group>"; };
 		400FCC410C9213C6AA6E9B1B /* PrivacyChoicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyChoicesView.swift; sourceTree = "<group>"; };
@@ -476,6 +478,7 @@
 			children = (
 				0B485E248E225AAA60C16019 /* AppSmokeTests.swift */,
 				0A25E072993F0DF9B435AF74 /* BeerCatalogTests.swift */,
+				3790C1282D2C4B39809DB396 /* DeleteAccountWiringTests.swift */,
 				BFDD087F4855721B840E53DE /* IdempotencyKeyRetryTests.swift */,
 			);
 			path = CheekyPintTests;
@@ -653,6 +656,7 @@
 			files = (
 				F4EDDCADA7B3D1DAE9F8FB5E /* AppSmokeTests.swift in Sources */,
 				2EBA417F30678B235EC70817 /* BeerCatalogTests.swift in Sources */,
+				AC2CCC69E150D6A237283A4A /* DeleteAccountWiringTests.swift in Sources */,
 				D727F36985DE6EBE31FA8872 /* IdempotencyKeyRetryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

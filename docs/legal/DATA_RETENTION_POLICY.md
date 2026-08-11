@@ -27,7 +27,9 @@ the service safe.
 2. Friend tokens revoked; friendships and blocks removed; sessions left.
 3. Pint entries soft-deleted, then purged on the schedule above.
 4. Avatar files and post photo files removed from storage; the auth user is deleted (cascade) by
-   the `delete-account` Edge Function.
+   the `delete-account` Edge Function, which the app invokes as part of deletion. This removes the
+   files at those storage paths; a photo URL already copied, screenshotted, or shared elsewhere
+   before deletion cannot be recalled.
 
 See the [Account Deletion Policy](ACCOUNT_DELETION_POLICY.md).
 

@@ -90,9 +90,14 @@ struct ProfileRepository: Sendable {
         return token
     }
 
+    /// Calls the `delete-account` Edge Function, which runs the `delete_account()` RPC as the
+    /// caller (anonymise + tear down app data), then — with the service role, which never
+    /// reaches this client — removes the caller's storage objects and deletes the auth user.
+    /// Do NOT also call `rpcVoid("delete_account")` here: the function already runs it, and
+    /// calling both would run the anonymisation twice.
     func deleteAccount() async throws {
         if await DemoWorld.shared.isActive { await DemoWorld.shared.deactivate(); return }
-        try await data.rpcVoid("delete_account")
+        try await data.invokeFunctionVoid("delete-account")
     }
 
     /// Upload a resized JPEG avatar into the caller's own folder and point the profile at it.

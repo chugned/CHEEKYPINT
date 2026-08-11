@@ -42,7 +42,10 @@ drinking age.
 ## 4. Sharing
 
 Only with **accepted friends**, and only the fields your privacy settings permit. There is no
-public visibility and no global leaderboard. We do **not** sell personal data or run targeted ads.
+global leaderboard. One exception: profile photo and post photo image files sit in storage
+buckets that are public-read at the storage layer (unlisted, not access-controlled), so anyone
+holding the file URL can fetch the image bytes directly — see "Known tradeoff" in our
+[Privacy overview](../PRIVACY.md) for detail. We do **not** sell personal data or run targeted ads.
 
 ## 5. Processors & international transfers
 

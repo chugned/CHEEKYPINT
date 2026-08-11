@@ -50,8 +50,11 @@ struct DeleteAccountView: View {
         isDeleting = true; errorMessage = nil
         defer { isDeleting = false }
         do {
-            // Anonymises + tears down app data now; the delete-account Edge Function completes
-            // storage + auth-user removal in production.
+            // Calls the delete-account Edge Function, which runs delete_account() as the caller
+            // (anonymise + tear down app data), then removes their avatar/post-photo storage
+            // objects and deletes the auth user — all before this call returns. If it fails
+            // partway (e.g. after anonymising but before the auth-user delete), it throws and
+            // the catch below reports it; nothing here treats a partial run as success.
             try await container.profiles.deleteAccount()
             await session.signOut()
         } catch let error as SupabaseError {

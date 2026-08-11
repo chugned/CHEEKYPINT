@@ -37,6 +37,20 @@ struct SupabaseData: Sendable {
 
     func rpcVoid(_ function: String) async throws { try await rpcVoid(function, params: EmptyBody()) }
 
+    // MARK: Edge Functions
+
+    /// Invoke a Supabase Edge Function with no interesting return value, carrying the caller's
+    /// own bearer token (never the service role — that key lives only in the function's
+    /// environment). Used for work an RPC can't finish alone, e.g. `delete-account`, which needs
+    /// elevated privileges to remove storage objects and the auth user after running the
+    /// SECURITY DEFINER RPC as the caller.
+    func invokeFunctionVoid(_ name: String) async throws {
+        _ = try await perform(
+            method: "POST",
+            url: config.functionsURL.appendingPathComponent(name),
+            body: SupabaseJSON.encoder.encode(EmptyBody()))
+    }
+
     // MARK: Table access (own rows only, gated by RLS)
 
     func select<T: Decodable>(_ table: String, query: [URLQueryItem] = [], as: T.Type = T.self) async throws -> [T] {
