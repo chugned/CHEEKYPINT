@@ -19,7 +19,8 @@ as $$
            translate(
              coalesce(t, ''),
              chr(8203) || chr(8204) || chr(8205) || chr(8206) || chr(8207) ||
-             chr(8234) || chr(8235) || chr(8236) || chr(8237) || chr(8238) || chr(65279),
+             chr(8234) || chr(8235) || chr(8236) || chr(8237) || chr(8238) || chr(65279) ||
+             chr(8288) || chr(8294) || chr(8295) || chr(8296) || chr(8297),
              ''
            ),
            '[[:cntrl:]]', '', 'g'
@@ -39,9 +40,13 @@ create table public.posts (
   created_at timestamptz not null default now(),
   deleted_at timestamptz,
   -- A post is a photo, some words, or both — never neither.
-  constraint posts_has_content check (body is not null or image_path is not null),
+  constraint posts_has_content check (
+    char_length(btrim(coalesce(body, ''))) > 0 or char_length(btrim(coalesce(image_path, ''))) > 0
+  ),
   -- A pub reference always carries the label the feed renders, so readers need no join.
-  constraint posts_pub_needs_label check (pub_id is null or place_label is not null)
+  constraint posts_pub_needs_label check (
+    pub_id is null or char_length(btrim(coalesce(place_label, ''))) > 0
+  )
 );
 
 comment on table public.posts is
@@ -59,8 +64,6 @@ create table public.post_cheers (
 
 comment on table public.post_cheers is
   'One Cheers per user per post; the RPC toggles. Never affects drink totals.';
-
-create index post_cheers_post_idx on public.post_cheers (post_id);
 
 create table public.post_comments (
   id uuid primary key default gen_random_uuid(),

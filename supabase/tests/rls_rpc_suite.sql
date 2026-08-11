@@ -205,11 +205,6 @@ do $$ declare ok boolean := false; begin
   raise notice 'PASS t19: revoked token no longer resolves';
 end $$;
 
-reset role;
-\echo '-------------------------------------------'
-\echo 'ALL RLS/RPC CHECKS PASSED'
-\echo '-------------------------------------------'
-
 -- ============================ FEED: table lockdown ============================
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 
@@ -228,5 +223,16 @@ end $$;
 do $$ declare v text; begin
   select public.strip_ugc_control_chars('a' || chr(8203) || chr(9) || 'b' || chr(8237) || 'c') into v;
   if v <> 'abc' then raise exception 'FAIL t27: strip_ugc_control_chars gave %', v; end if;
-  raise notice 'PASS t27: control, zero-width and bidi characters are stripped';
+  -- Bidi isolates and the word joiner are the Trojan-Source scrambling set.
+  select public.strip_ugc_control_chars('d' || chr(8294) || chr(8295) || 'e' || chr(8296) || chr(8297) || chr(8288) || 'f') into v;
+  if v <> 'def' then raise exception 'FAIL t27: bidi isolates/word joiner survived, got %', v; end if;
+  -- C1 controls too.
+  select public.strip_ugc_control_chars('g' || chr(133) || 'h') into v;
+  if v <> 'gh' then raise exception 'FAIL t27: C1 control survived, got %', v; end if;
+  raise notice 'PASS t27: control, zero-width, bidi and isolate characters are stripped';
 end $$;
+
+reset role;
+\echo '-------------------------------------------'
+\echo 'ALL RLS/RPC CHECKS PASSED'
+\echo '-------------------------------------------'
