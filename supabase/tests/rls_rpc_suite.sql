@@ -1367,6 +1367,40 @@ do $$ declare ok boolean := false; begin
   raise notice 'PASS t51: export_my_data is rate-limited (data_export, 5/24h)';
 end $$;
 
+-- ============================ HELPER ORACLES ============================
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000c3';
+do $$
+declare ok_friend boolean := false; ok_blocked boolean := false; ok_profile boolean := false;
+begin
+  -- Ceri must not be able to interrogate other people's relationships directly.
+  begin
+    perform public.is_accepted_friend(
+      '00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000b2');
+  exception when others then ok_friend := true;
+  end;
+  begin
+    perform public.is_blocked(
+      '00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000d4');
+  exception when others then ok_blocked := true;
+  end;
+  begin
+    perform public.can_view_profile(
+      '00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000b2');
+  exception when others then ok_profile := true;
+  end;
+  if not ok_friend then raise exception 'FAIL t52: is_accepted_friend is a client-callable oracle'; end if;
+  if not ok_blocked then raise exception 'FAIL t52: is_blocked is a client-callable oracle'; end if;
+  if not ok_profile then raise exception 'FAIL t52: can_view_profile is a client-callable oracle'; end if;
+  raise notice 'PASS t52: relationship helpers are not callable by clients';
+end $$;
+
+-- ...and the feed still works, i.e. the revoke did not break the definer functions that use them.
+do $$ declare visible int; begin
+  select count(*) into visible from public.feed_page(null, null, 20);
+  if visible < 1 then raise exception 'FAIL t52: feed_page returned % rows after the revoke', visible; end if;
+  raise notice 'PASS t52: feed_page still works — nested definer calls are unaffected';
+end $$;
+
 reset role;
 \echo '-------------------------------------------'
 \echo 'ALL RLS/RPC CHECKS PASSED'
