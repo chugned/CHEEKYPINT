@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Tasks:** 4 (Task 1 merges the original Tasks 1-2 so it ends on a green build).
+
 **Goal:** Remove the licence-violating Wikimedia beer photos, make logging a single tap, and rename the friend "Cheers" nudge to "Nudge" so the Cheers name is free for the upcoming feed reaction.
 
 **Architecture:** Parts A and C of `docs/superpowers/specs/2026-08-11-social-feed-design.md`. Part A strips the remote-image layer from `BeerCatalog` and replaces the photo card grid with a compact tap-to-log list, moving serving/time/note/alcohol-free into a collapsed `Details` disclosure. Part C is a mechanical rename across SQL, the data layer, and the leaderboard UI. Part B (the feed) is a separate plan and is **not** in scope here.
@@ -18,7 +20,7 @@
 - The alcohol-free toggle must survive. `WelfareMonitor` counts *alcoholic* entries to decide when to show the welfare notice; `docs/RESPONSIBLE_DRINKING.md` treats this as a hard product requirement.
 - No new third-party dependencies. The app ships with zero.
 - Existing suites must stay green after every task: **54 `CheekyPintCore` tests** and **8 app tests**.
-- **Commits require the user's explicit go-ahead.** This repo currently has ~30 pre-existing uncommitted changes unrelated to this plan; do not sweep them into a commit. Confirm before running any `git commit`.
+- Work happens on branch `feat/instant-log-nudge`, cut from a clean tree (baseline commit `3a7c82b`). Commit at the end of each task as the steps instruct. Never commit on `master`, and never amend or rebase existing commits.
 
 ---
 
@@ -42,7 +44,7 @@
 
 ---
 
-### Task 1: Strip the remote-image layer from BeerCatalog
+### Task 1: Instant tap-to-log (strip images, add Details disclosure)
 
 **Files:**
 - Modify: `CheekyPint/Features/PintLogging/LogPintSheet.swift`
@@ -181,29 +183,9 @@ xcodebuild test -project CheekyPint.xcodeproj -scheme CheekyPint \
 
 Expected: `Executed 4 tests, with 0 failures`.
 
-Note: the build still fails elsewhere at this point — `BeerCard.beerImage` and `GeneratedBeerArtwork` reference the deleted `imageURL`. Task 2 removes them. If you need a green build before proceeding, do Tasks 1 and 2 together.
+Note: the build is still red at this point — `BeerCard.beerImage` and `GeneratedBeerArtwork` reference the deleted `imageURL`. Steps 5-8 remove them; the build goes green at Step 9.
 
-- [ ] **Step 5: Commit** (confirm with the user first — see Global Constraints)
-
-```bash
-git add CheekyPint/Features/PintLogging/LogPintSheet.swift \
-        CheekyPintTests/BeerCatalogTests.swift
-git rm CheekyPintTests/BeerImageURLTests.swift
-git commit -m "refactor: remove Wikimedia image layer from beer catalog"
-```
-
----
-
-### Task 2: Tap-to-log list + Details disclosure
-
-**Files:**
-- Modify: `CheekyPint/Features/PintLogging/LogPintSheet.swift`
-
-**Interfaces:**
-- Consumes: `BeerChoice` from Task 1; `container.diary.createPint(idempotencyKey:occurredAt:serving:volumeMl:alcoholFree:pubID:sessionID:note:)`; `IdempotencyKey.generate()`; `BeerCatalog.diaryNote(for:userNote:)`.
-- Produces: `LogPintSheet(onLogged:)` — unchanged public shape, so `HomeView` needs no edit.
-
-- [ ] **Step 1: Delete the photo and confirm-button views**
+- [ ] **Step 5: Delete the photo and confirm-button views**
 
 Remove these declarations entirely from `LogPintSheet.swift`:
 - `private var beerImage: some View` and `private var fallbackImage: some View` (inside `BeerCard`)
@@ -216,7 +198,7 @@ Remove these declarations entirely from `LogPintSheet.swift`:
 
 Keep `PintGlass` — `PintPourView` still uses it.
 
-- [ ] **Step 2: Add the row view**
+- [ ] **Step 6: Add the row view**
 
 ```swift
 /// A single tappable catalog row. The tap is the logging action, so the whole row is a hit
@@ -255,7 +237,7 @@ private struct BeerRow: View {
 }
 ```
 
-- [ ] **Step 3: Replace `beerSection` and fold the old sections into `Details`**
+- [ ] **Step 7: Replace `beerSection` and fold the old sections into `Details`**
 
 ```swift
     private var beerSection: some View {
@@ -317,7 +299,7 @@ Delete `servingSection` and `noteSection`, and update `body` so the `Form` conta
             }
 ```
 
-- [ ] **Step 4: Add the per-tap logging function**
+- [ ] **Step 8: Add the per-tap logging function**
 
 ```swift
     private func log(_ beer: BeerChoice) async {
@@ -356,7 +338,7 @@ Delete `servingSection` and `noteSection`, and update `body` so the `Form` conta
 
 Delete the now-unused `@State private var idempotencyKey = IdempotencyKey.generate()`.
 
-- [ ] **Step 5: Build and run the full app suite**
+- [ ] **Step 9: Build and run the full app suite**
 
 ```bash
 xcodebuild test -project CheekyPint.xcodeproj -scheme CheekyPint \
@@ -366,7 +348,7 @@ xcodebuild test -project CheekyPint.xcodeproj -scheme CheekyPint \
 
 Expected: build succeeds, `Executed 7 tests, with 0 failures` (3 pre-existing `AppSmokeTests` + 4 new `BeerCatalogTests`).
 
-- [ ] **Step 6: Verify on the simulator**
+- [ ] **Step 10: Verify on the simulator**
 
 ```bash
 xcodebuild -project CheekyPint.xcodeproj -scheme CheekyPint -configuration Debug \
@@ -384,7 +366,7 @@ xcrun simctl io "iPhone 17 Pro" screenshot /tmp/tap-to-log.png
 
 Expected: a text-only beer list, no spinners, one tap logs and shows the celebration.
 
-- [ ] **Step 7: Update the catalog notes**
+- [ ] **Step 11: Update the catalog notes**
 
 In `FRIEND_CIRCLE_NOTES.md`, replace lines 42-46 (the paragraph beginning "Image-backed beers load from Wikimedia Commons") with:
 
@@ -396,16 +378,17 @@ a row logs that beer immediately; serving size, alcohol-free, time and a private
 the collapsed `Details` disclosure.
 ```
 
-- [ ] **Step 8: Commit** (confirm with the user first)
+- [ ] **Step 12: Commit**
 
 ```bash
-git add CheekyPint/Features/PintLogging/LogPintSheet.swift FRIEND_CIRCLE_NOTES.md
+git add CheekyPint/Features/PintLogging/LogPintSheet.swift CheekyPintTests/BeerCatalogTests.swift FRIEND_CIRCLE_NOTES.md
+git rm --cached CheekyPintTests/BeerImageURLTests.swift 2>/dev/null || true
 git commit -m "feat: log a beer with one tap, drop photo cards"
 ```
 
 ---
 
-### Task 3: Rename the nudge in SQL
+### Task 2: Rename the nudge in SQL
 
 **Files:**
 - Rename: `supabase/migrations/20260803000000_cheers.sql` → `supabase/migrations/20260803000000_nudges.sql`
@@ -475,9 +458,9 @@ Apply the same substitutions to every hit, then re-run the grep and expect no ou
 ./supabase/tests/run_local_pg.sh
 ```
 
-Expected: the suite passes, including the renamed nudge cases. If local Postgres is unavailable, note it and move on — Task 5's UI test exercises the demo path, which needs no database.
+Expected: the suite passes, including the renamed nudge cases. If local Postgres is unavailable, note it and move on — Task 4's UI test exercises the demo path, which needs no database.
 
-- [ ] **Step 5: Commit** (confirm with the user first)
+- [ ] **Step 5: Commit** 
 
 ```bash
 git add supabase/
@@ -486,7 +469,7 @@ git commit -m "refactor: rename cheers table and RPCs to nudges"
 
 ---
 
-### Task 4: Rename the nudge in the data layer
+### Task 3: Rename the nudge in the data layer
 
 **Files:**
 - Modify: `CheekyPint/Core/Database/RPCContracts.swift`
@@ -494,7 +477,7 @@ git commit -m "refactor: rename cheers table and RPCs to nudges"
 - Modify: `CheekyPint/Core/Demo/DemoWorld.swift`
 
 **Interfaces:**
-- Consumes: `send_nudge` / `get_received_nudges` from Task 3.
+- Consumes: `send_nudge` / `get_received_nudges` from Task 2.
 - Produces: `NudgeParams(pRecipientId:)`; `NudgeDTO(nudgeId:senderId:displayName:avatarPath:createdAt:)` with `id == nudgeId`; `FriendsRepository.sendNudge(to:)` and `FriendsRepository.fetchReceivedNudges()`; `DemoWorld.sendNudge(to:)` and `DemoWorld.receivedNudges()`.
 
 - [ ] **Step 1: Rename the DTOs**
@@ -517,7 +500,7 @@ struct NudgeDTO: Decodable, Sendable, Identifiable {
 }
 ```
 
-No `CodingKeys` are needed: `JSONCoding.swift:9` sets `decoder.keyDecodingStrategy = .convertFromSnakeCase`, so `nudgeId` decodes from the `nudge_id` column that Task 3 renames. This is why Task 3's `cheers_id` → `nudge_id` substitution is mandatory — miss it and this DTO fails to decode at runtime with no compile error.
+No `CodingKeys` are needed: `JSONCoding.swift:9` sets `decoder.keyDecodingStrategy = .convertFromSnakeCase`, so `nudgeId` decodes from the `nudge_id` column that Task 2 renames. This is why Task 2's `cheers_id` → `nudge_id` substitution is mandatory — miss it and this DTO fails to decode at runtime with no compile error.
 
 - [ ] **Step 2: Rename the repository methods**
 
@@ -565,7 +548,7 @@ grep -in "cheers" CheekyPint/Core/
 
 Expected: no output.
 
-- [ ] **Step 5: Commit** (confirm with the user first)
+- [ ] **Step 5: Commit** 
 
 ```bash
 git add CheekyPint/Core/
@@ -574,7 +557,7 @@ git commit -m "refactor: rename cheers to nudge in the data layer"
 
 ---
 
-### Task 5: Rename the nudge in the UI and its test
+### Task 4: Rename the nudge in the UI and its test
 
 **Files:**
 - Modify: `CheekyPint/Features/Leaderboard/LeaderboardRowView.swift`
@@ -582,7 +565,7 @@ git commit -m "refactor: rename cheers to nudge in the data layer"
 - Modify: `CheekyPintUITests/OnboardingUITests.swift`
 
 **Interfaces:**
-- Consumes: `NudgeDTO`, `sendNudge(to:)`, `fetchReceivedNudges()` from Task 4.
+- Consumes: `NudgeDTO`, `sendNudge(to:)`, `fetchReceivedNudges()` from Task 3.
 - Produces: `NudgeButtonState` with cases `available`, `received`, `sending`, `sent`; `LeaderboardRowView(..., nudgeState:onNudge:)`.
 
 - [ ] **Step 1: Update the UI test first (it is the regression gate)**
@@ -706,7 +689,7 @@ xcodebuild test -project CheekyPint.xcodeproj -scheme CheekyPint \
 
 Expected: 54 `CheekyPintCore` tests pass; app unit + UI tests pass.
 
-- [ ] **Step 8: Commit** (confirm with the user first)
+- [ ] **Step 8: Commit** 
 
 ```bash
 git add CheekyPint/Features/Leaderboard/ CheekyPintUITests/OnboardingUITests.swift
