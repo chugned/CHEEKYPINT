@@ -238,36 +238,48 @@ reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-00000
 do $$ declare v jsonb; v_count int; begin
   select public.create_post('First pint of the trip', null, 'Prague', null) into v;
   if (v->>'post_id') is null then raise exception 'FAIL t28: create_post returned no post_id'; end if;
-  select count(*) into v_count from public.feed_page(null, 20) where author_id = '00000000-0000-4000-8000-0000000000a1';
+  select count(*) into v_count from public.feed_page(null, null, 20) where author_id = '00000000-0000-4000-8000-0000000000a1';
   if v_count <> 1 then raise exception 'FAIL t28: author sees % of own posts (want 1)', v_count; end if;
   raise notice 'PASS t28: create_post stores a post the author can read back';
 end $$;
 
-do $$ begin
+do $$ declare ok boolean; v_sqlstate text; begin
+  ok := false;
   begin
     perform public.create_post(null, null, 'Prague', null);
-    raise exception 'FAIL t29: create_post accepted a post with neither body nor image';
-  exception when others then null;
+  exception when others then
+    ok := true; v_sqlstate := sqlstate;
   end;
+  if not ok then raise exception 'FAIL t29: create_post accepted a post with neither body nor image'; end if;
+  if v_sqlstate is distinct from '22023' then
+    raise exception 'FAIL t29: wrong errcode % for empty post (want 22023)', v_sqlstate;
+  end if;
+
+  ok := false;
   begin
     perform public.create_post('x', null, null, '00000000-0000-4000-8000-00000000e001');
-    raise exception 'FAIL t29: create_post accepted a pub_id with no place_label';
-  exception when others then null;
+  exception when others then
+    ok := true; v_sqlstate := sqlstate;
   end;
-  raise notice 'PASS t29: create_post rejects empty posts and unlabelled pub references';
+  if not ok then raise exception 'FAIL t29: create_post accepted a pub_id with no place_label'; end if;
+  if v_sqlstate is distinct from '22023' then
+    raise exception 'FAIL t29: wrong errcode % for unlabelled pub (want 22023)', v_sqlstate;
+  end if;
+
+  raise notice 'PASS t29: create_post rejects empty posts and unlabelled pub references with errcode 22023';
 end $$;
 
 do $$ declare v text; begin
   perform public.create_post('clean' || chr(8203) || chr(9) || 'text', null, null, null);
-  select body into v from public.feed_page(null, 20) order by created_at desc limit 1;
-  if v <> 'cleantext' then raise exception 'FAIL t30: post body not sanitised, got %', v; end if;
+  select body into v from public.feed_page(null, null, 20) order by created_at desc limit 1;
+  if v is distinct from 'cleantext' then raise exception 'FAIL t30: post body not sanitised, got %', v; end if;
   raise notice 'PASS t30: create_post strips control and zero-width characters from the body';
 end $$;
 
 -- Barnaby is an accepted friend of Alice; Ceri is a friend of Alice but NOT of Barnaby.
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
 do $$ declare v_count int; begin
-  select count(*) into v_count from public.feed_page(null, 20)
+  select count(*) into v_count from public.feed_page(null, null, 20)
     where author_id = '00000000-0000-4000-8000-0000000000a1';
   if v_count <> 2 then raise exception 'FAIL t31: friend sees % of Alice posts (want 2)', v_count; end if;
   raise notice 'PASS t31: an accepted friend sees the posts';
@@ -275,29 +287,68 @@ end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000d4';
 do $$ declare v_count int; begin
-  select count(*) into v_count from public.feed_page(null, 20);
+  select count(*) into v_count from public.feed_page(null, null, 20);
   if v_count <> 0 then raise exception 'FAIL t31: blocked user sees % posts (want 0)', v_count; end if;
   raise notice 'PASS t31: a blocked user sees nothing';
 end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 do $$ declare v_id uuid; v_count int; begin
-  select post_id into v_id from public.feed_page(null, 20) order by created_at desc limit 1;
+  select post_id into v_id from public.feed_page(null, null, 20) order by created_at desc limit 1;
   perform public.delete_post(v_id);
-  select count(*) into v_count from public.feed_page(null, 20) where post_id = v_id;
+  select count(*) into v_count from public.feed_page(null, null, 20) where post_id = v_id;
   if v_count <> 0 then raise exception 'FAIL t32: soft-deleted post still visible'; end if;
   raise notice 'PASS t32: delete_post hides the post from every read path';
 end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
-do $$ declare v_id uuid; begin
-  select post_id into v_id from public.feed_page(null, 20) limit 1;
+do $$ declare v_id uuid; ok boolean := false; begin
+  select post_id into v_id from public.feed_page(null, null, 20) limit 1;
+  if v_id is null then raise exception 'FAIL t32: no post to test with'; end if;
   begin
     perform public.delete_post(v_id);
-    raise exception 'FAIL t32: a non-author deleted someone else''s post';
-  exception when others then null;
+  exception when others then ok := true;
   end;
+  if not ok then raise exception 'FAIL t32: a non-author deleted someone else''s post'; end if;
   raise notice 'PASS t32: only the author can delete a post';
+end $$;
+
+-- ============================ FEED: friends-only, not just non-blocked ============================
+-- Barnaby and Ceri are both Alice's friends but not each other's, and neither blocks the
+-- other. If feed_page's visibility predicate were ever loosened from is_accepted_friend to a
+-- bare not-blocked check ("total feed exposure"), every t26-t32 assertion above would still
+-- pass unchanged — this is the gate that actually catches that regression.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
+do $$ declare v jsonb; begin
+  select public.create_post('Barnaby-only post', null, null, null) into v;
+  if (v->>'post_id') is null then raise exception 'FAIL t33: Barnaby could not create a post'; end if;
+  raise notice 'PASS t33: Barnaby creates a post for the friends-only visibility check';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000c3';
+do $$ declare v_count int; begin
+  select count(*) into v_count from public.feed_page(null, null, 20)
+    where author_id = '00000000-0000-4000-8000-0000000000b2';
+  if v_count <> 0 then raise exception 'FAIL t33: non-friend, non-blocked Ceri sees % of Barnaby posts (want 0)', v_count; end if;
+  raise notice 'PASS t33: a non-friend who is not blocked still cannot see the posts';
+end $$;
+
+-- ============================ FEED: image path ownership ============================
+-- The post-images bucket's own insert policy restricts uploads to the uploader's folder;
+-- create_post must enforce the same rule, or a caller can pass a path they merely read
+-- (unguessable filename, but readable once known) and re-broadcast someone else's photo.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000b2';
+do $$ declare ok boolean := false; v_sqlstate text; begin
+  begin
+    perform public.create_post('borrowed photo', '00000000-0000-4000-8000-0000000000a1/sneaky.jpg', null, null);
+  exception when others then
+    ok := true; v_sqlstate := sqlstate;
+  end;
+  if not ok then raise exception 'FAIL t34: create_post accepted an image path outside the caller''s folder'; end if;
+  if v_sqlstate is distinct from '22023' then
+    raise exception 'FAIL t34: wrong errcode % for foreign-folder image (want 22023)', v_sqlstate;
+  end if;
+  raise notice 'PASS t34: create_post rejects an image path outside the caller''s own folder';
 end $$;
 
 reset role;
