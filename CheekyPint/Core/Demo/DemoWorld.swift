@@ -32,9 +32,9 @@ actor DemoWorld {
     private var entries: [PintEntry] = []
     private var session: PubSession?
     private var pubs: [UUID: Pub] = [:]
-    private var cheers: [DemoCheers] = []
+    private var nudges: [DemoNudge] = []
 
-    private struct DemoCheers {
+    private struct DemoNudge {
         let id: UUID
         let senderID: UUID
         let recipientID: UUID
@@ -87,10 +87,10 @@ actor DemoWorld {
             entry(60 * 24 * 8, user: Self.ceriID, beer: "Pilsner Urquell", pub: Self.officePubID),
             entry(60 * 24 * 20, user: Self.ceriID, beer: "Ottakringer Helles", pub: Self.krugPubID),
         ]
-        // Seed one incoming Cheers so the interaction is immediately visible in demo and
-        // friend-circle mode. Sending it back turns it into an outgoing Cheers.
-        cheers = [
-            DemoCheers(
+        // Seed one incoming Nudge so the interaction is immediately visible in demo and
+        // friend-circle mode. Sending it back turns it into an outgoing Nudge.
+        nudges = [
+            DemoNudge(
                 id: UUID(),
                 senderID: Self.barnabyID,
                 recipientID: Self.aliceID,
@@ -246,21 +246,21 @@ actor DemoWorld {
                          visitCount: 3, lastVisit: Date(), sharedVisitCount: 1)]
     }
 
-    // MARK: Cheers
+    // MARK: Nudges
 
-    func sendCheers(to recipientID: UUID) throws {
+    func sendNudge(to recipientID: UUID) throws {
         guard recipientID == Self.barnabyID || recipientID == Self.ceriID else {
             throw SupabaseError.forbidden
         }
-        if cheers.contains(where: {
+        if nudges.contains(where: {
             $0.senderID == Self.aliceID && $0.recipientID == recipientID
         }) {
-            throw SupabaseError.rateLimited(hint: "Cheers already sent — wait for your friend to cheer back.")
+            throw SupabaseError.rateLimited(hint: "Nudge already sent — wait for your friend to nudge back.")
         }
 
-        // A reply acknowledges every incoming Cheers from this friend before sending it back.
-        cheers.removeAll { $0.senderID == recipientID && $0.recipientID == Self.aliceID }
-        cheers.append(DemoCheers(
+        // A reply acknowledges every incoming Nudge from this friend before sending it back.
+        nudges.removeAll { $0.senderID == recipientID && $0.recipientID == Self.aliceID }
+        nudges.append(DemoNudge(
             id: UUID(),
             senderID: Self.aliceID,
             recipientID: recipientID,
@@ -268,13 +268,13 @@ actor DemoWorld {
         ))
     }
 
-    func receivedCheers() -> [CheersDTO] {
-        cheers
+    func receivedNudges() -> [NudgeDTO] {
+        nudges
             .filter { $0.recipientID == Self.aliceID }
             .sorted { $0.createdAt > $1.createdAt }
             .map { item in
-                CheersDTO(
-                    cheersId: item.id,
+                NudgeDTO(
+                    nudgeId: item.id,
                     senderId: item.senderID,
                     displayName: item.senderID == Self.barnabyID ? "Barnaby" : "Ceri",
                     avatarPath: nil,

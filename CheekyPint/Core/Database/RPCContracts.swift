@@ -29,7 +29,7 @@ struct UserParams: Encodable, Sendable { let pUser: UUID }
 struct SessionParams: Encodable, Sendable { let pSessionId: UUID }
 struct CreateSessionParams: Encodable, Sendable { let pPubId: UUID?; let pName: String? }
 struct ClinkParams: Encodable, Sendable { let pSessionId: UUID; let pParticipants: [UUID] }
-struct CheersParams: Encodable, Sendable { let pRecipientId: UUID }
+struct NudgeParams: Encodable, Sendable { let pRecipientId: UUID }
 
 struct LeaderboardParams: Encodable, Sendable {
     let pPeriodStart: Date
@@ -101,12 +101,12 @@ struct CreatedSessionDTO: Decodable, Sendable {
     let status: String
 }
 
-/// One unanswered Cheers, shown to its recipient until they send Cheers back.
-struct CheersDTO: Decodable, Sendable, Identifiable {
-    let cheersId: UUID
+/// One unanswered Nudge, shown to its recipient until they nudge back.
+struct NudgeDTO: Decodable, Sendable, Identifiable {
+    let nudgeId: UUID
     let senderId: UUID
     let displayName: String
     let avatarPath: String?
     let createdAt: Date
-    var id: UUID { cheersId }
+    var id: UUID { nudgeId }
 }

@@ -70,20 +70,20 @@ struct FriendsRepository: Sendable {
         return try await data.rpc("get_blocked_users", params: EmptyBody())
     }
 
-    // MARK: Cheers
+    // MARK: Nudges
 
-    /// Send a Facebook-Poke-style Cheers. Only one unanswered Cheers can be waiting in a
-    /// direction; cheering back acknowledges the incoming one and sends a fresh one back.
-    func sendCheers(to recipientID: UUID) async throws {
+    /// Send a Facebook-Poke-style Nudge. Only one unanswered Nudge can be waiting in a
+    /// direction; nudging back acknowledges the incoming one and sends a fresh one back.
+    func sendNudge(to recipientID: UUID) async throws {
         if await DemoWorld.shared.isActive {
-            try await DemoWorld.shared.sendCheers(to: recipientID)
+            try await DemoWorld.shared.sendNudge(to: recipientID)
             return
         }
-        try await data.rpcVoid("send_cheers", params: CheersParams(pRecipientId: recipientID))
+        try await data.rpcVoid("send_nudge", params: NudgeParams(pRecipientId: recipientID))
     }
 
-    func fetchReceivedCheers() async throws -> [CheersDTO] {
-        if await DemoWorld.shared.isActive { return await DemoWorld.shared.receivedCheers() }
-        return try await data.rpc("get_received_cheers", params: EmptyBody())
+    func fetchReceivedNudges() async throws -> [NudgeDTO] {
+        if await DemoWorld.shared.isActive { return await DemoWorld.shared.receivedNudges() }
+        return try await data.rpc("get_received_nudges", params: EmptyBody())
     }
 }
