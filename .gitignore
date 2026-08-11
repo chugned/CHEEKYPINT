@@ -33,3 +33,6 @@ fastlane/screenshots
 
 # Node (tooling only)
 node_modules/
+
+# Subagent-driven-development scratch workspace
+.superpowers/
