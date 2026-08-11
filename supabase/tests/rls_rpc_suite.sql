@@ -706,20 +706,31 @@ do $$ declare v_own uuid; v_other uuid; ss_self text; ss_hidden text; begin
   raise notice 'PASS t42: self-reports and reports of invisible posts are rejected by the app guards';
 end $$;
 
--- I4: report_comment had zero coverage. Ceri comments on Alice's post so the comment's author
--- (Ceri) is provably DIFFERENT from the post's author (Alice) — if report_comment's author
--- resolution regressed to filing against the POST's author instead of the COMMENT's, v_reported
--- below would read back as Alice instead of Ceri and this assertion would catch it.
+-- I4, take 2 (fix-round-2): the first version of this test had Alice as both the post's author
+-- and the reporter, so under the EXACT regression it exists to catch — report_comment resolving
+-- v_author from the POST's author instead of the COMMENT's — v_author became Alice, which equalled
+-- v_uid (Alice), and report_comment's OWN self-report guard raised 22023 before v_reported/v_linked
+-- were ever computed. The suite still went red, but the author-resolution assertion never ran —
+-- the same masking pattern as the original t42. Fixed by making the reporter distinct from BOTH
+-- the post author and the comment author: Alice authors the post, Ceri (Alice's friend) comments,
+-- Barnaby (also Alice's friend, not blocked with Ceri) reports. Under the regression, v_author
+-- resolves to Alice, which is neither Barnaby (the self-report guard does not fire) nor Ceri (the
+-- true comment author) — the insert SUCCEEDS with the wrong reported_user_id, and that is exactly
+-- what the assertion below catches. ids are captured directly from each RPC's own return value
+-- (never re-queried via feed_page/post_comments_page), so there is no multi-author ambiguity to
+-- guard against here.
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 do $$ declare v_post uuid; v_comment uuid; v jsonb; v_reported uuid; v_linked uuid; begin
-  select public.create_post('t43 setup: Alice post for report_comment coverage', null, null, null) into v;
+  select public.create_post('t43 setup: Alice post, Ceri comments, Barnaby reports', null, null, null) into v;
   v_post := (v->>'post_id')::uuid;
+  if v_post is null then raise exception 'FAIL t43: no post_id from create_post'; end if;
 
   perform set_config('app.uid', '00000000-0000-4000-8000-0000000000c3', false);
-  select public.add_comment(v_post, 'Ceri comment to be reported', null) into v;
+  select public.add_comment(v_post, 'Ceri comment to be reported by Barnaby', null) into v;
   v_comment := (v->>'comment_id')::uuid;
+  if v_comment is null then raise exception 'FAIL t43: no comment_id from add_comment'; end if;
 
-  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000a1', false);
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000b2', false);
   select public.report_comment(v_comment, 'inappropriate_text', 'rude') into v;
   if (v->>'report_id') is null then raise exception 'FAIL t43: report_comment returned no id'; end if;
   if (v->>'status') is distinct from 'open' then raise exception 'FAIL t43: status % (want open)', v->>'status'; end if;
@@ -729,8 +740,12 @@ do $$ declare v_post uuid; v_comment uuid; v jsonb; v_reported uuid; v_linked uu
   if v_reported is distinct from '00000000-0000-4000-8000-0000000000c3'::uuid then
     raise exception 'FAIL t43: reported_user_id % is not the COMMENT author (Ceri)', v_reported; end if;
   if v_linked is distinct from v_comment then raise exception 'FAIL t43: report not linked to the comment'; end if;
-  raise notice 'PASS t43: report_comment files against the comment author (not the post author) and links the comment';
+  raise notice 'PASS t43: report_comment files against the comment author (not the post author), even with reporter, post author and comment author all distinct';
 end $$;
+
+-- t43 leaves the session identity as Barnaby (the reporter); reset to Alice before the blocks
+-- below, which each assume "Alice, commenting on her own post", as the surrounding style does.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 
 -- t43b: self-reporting your own comment is refused, on the app guard's own errcode.
 do $$ declare v_post uuid; v_comment uuid; v jsonb; ss text; begin
