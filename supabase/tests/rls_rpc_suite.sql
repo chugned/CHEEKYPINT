@@ -1134,6 +1134,63 @@ do $$ declare ok boolean := false; begin
   raise notice 'PASS t50: retention purges are not client-callable';
 end $$;
 
+-- ============================ DATA EXPORT (Art. 15 / 20) ============================
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare v jsonb; begin
+  select public.export_my_data() into v;
+  if v is null then raise exception 'FAIL t51: export returned null'; end if;
+  if (v->'profile'->>'id') is distinct from '00000000-0000-4000-8000-0000000000a1' then
+    raise exception 'FAIL t51: export profile id is %', v->'profile'->>'id'; end if;
+  if jsonb_typeof(v->'pint_entries') is distinct from 'array' then
+    raise exception 'FAIL t51: pint_entries is not an array'; end if;
+  if jsonb_array_length(v->'pint_entries') < 1 then
+    raise exception 'FAIL t51: export contains no pint entries for a user who has 4'; end if;
+  -- The export must be caller-scoped: no other user's rows may appear, in ANY collection —
+  -- a missing auth.uid() filter anywhere is a data breach, not just an over-return, so every
+  -- collection gets its own ownership assertion rather than trusting pint_entries alone.
+  if exists (
+    select 1 from jsonb_array_elements(v->'pint_entries') e
+     where (e->>'user_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
+  ) then raise exception 'FAIL t51: export leaked another user''s pint entries'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(v->'posts') e
+     where (e->>'author_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
+  ) then raise exception 'FAIL t51: export leaked another user''s posts'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(v->'comments') e
+     where (e->>'author_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
+  ) then raise exception 'FAIL t51: export leaked another user''s comments'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(v->'cheers_given') e
+     where (e->>'user_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
+  ) then raise exception 'FAIL t51: export leaked another user''s cheers'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(v->'friends') e
+     where (e->>'requester_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
+       and (e->>'addressee_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
+  ) then raise exception 'FAIL t51: export returned a friendship the caller is not party to'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(v->'blocks') e
+     where (e->>'blocker_id') is distinct from '00000000-0000-4000-8000-0000000000a1'
+  ) then raise exception 'FAIL t51: export leaked a block the caller did not place'; end if;
+  raise notice 'PASS t51: export_my_data returns the caller''s own data only';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$ declare ok boolean := false; begin
+  begin
+    perform public.export_my_data();
+    perform public.export_my_data();
+    perform public.export_my_data();
+    perform public.export_my_data();
+    perform public.export_my_data();
+    perform public.export_my_data();
+  exception when others then ok := true;
+  end;
+  if not ok then raise exception 'FAIL t51: a 6th export in the window was not rate-limited'; end if;
+  raise notice 'PASS t51: export_my_data is rate-limited (data_export, 5/24h)';
+end $$;
+
 reset role;
 \echo '-------------------------------------------'
 \echo 'ALL RLS/RPC CHECKS PASSED'
