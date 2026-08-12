@@ -272,7 +272,15 @@ final class PostCommentsViewModelTests: XCTestCase {
             comments: { _, cursor, _ in
                 if cursor == nil { return [c1, c2, c3] }
                 secondPageCursor = cursor
-                return [c4]
+                // Mirrors the real `(created_at, id) > cursor` server filter: only the correct
+                // cursor (c3's) yields c4. Any other cursor — in particular the locally-appended
+                // echo's, which sorts after everything — finds nothing newer and returns `[]`,
+                // exactly like production would. This makes the `contains(c4)` assertion below a
+                // second, independently-failing check of the same property the cursor-equality
+                // assertion checks, rather than a redundant assertion that would pass either way
+                // (an earlier version of this stub returned `[c4]` unconditionally, which made
+                // that assertion true regardless of which cursor was actually sent).
+                return cursor == c3.cursor ? [c4] : []
             },
             addComment: { _, _, _ in UUID() }
         )

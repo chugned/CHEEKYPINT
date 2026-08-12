@@ -94,4 +94,37 @@ final class FeedViewModelTests: XCTestCase {
                        "a second tap on a post with a Cheers request already outstanding must be " +
                        "ignored rather than firing its own request")
     }
+
+    /// `applyCommentCountDelta` is the fix for code review's "45 loaded 30, send → shows 31 when
+    /// the truth is 46": `PostCommentsSheet`/`PostCommentsViewModel` only know how many comments
+    /// *they* loaded, never the thread's real total, so the card's count must be adjusted by a
+    /// delta rather than replaced. Seeds a post at `commentCount` 45 (deliberately not derived
+    /// from anything the sheet loaded) and checks both directions survive round-tripping: +1 to
+    /// 46, then -1 back to 45 — a delta applied twice must not compound incorrectly or clamp.
+    func testApplyCommentCountDeltaAdjustsTheCardsCountInBothDirections() async throws {
+        let config = AppConfig(environment: .development,
+                               supabaseURL: URL(string: "https://unreachable.invalid")!,
+                               supabaseAnonKey: "k", universalHost: "unreachable.invalid")
+        let container = AppContainer(config: config)
+
+        let postID = UUID()
+        let seededPost = FeedPostDTO(
+            postId: postID, authorId: UUID(), displayName: "Barnaby", avatarPath: nil,
+            body: "a post with a long thread", imagePath: nil, placeLabel: nil, pubId: nil,
+            createdAtRaw: "2026-08-12T12:00:00.000Z", cheersCount: 0, viewerHasCheered: false,
+            commentCount: 45)
+
+        let model = FeedViewModel(container: container, page: { _, _ in [seededPost] })
+        await model.load()
+        XCTAssertEqual(model.posts.first?.commentCount, 45, "seeded at the server's real total")
+
+        model.applyCommentCountDelta(postID: postID, delta: 1)
+        XCTAssertEqual(model.posts.first?.commentCount, 46,
+                       "a confirmed send must add to the total (45 -> 46), not replace it with " +
+                       "however many rows the sheet happened to have loaded")
+
+        model.applyCommentCountDelta(postID: postID, delta: -1)
+        XCTAssertEqual(model.posts.first?.commentCount, 45,
+                       "a confirmed delete must subtract from the total (46 -> 45)")
+    }
 }

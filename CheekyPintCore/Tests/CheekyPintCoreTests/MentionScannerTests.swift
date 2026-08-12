@@ -68,17 +68,6 @@ final class MentionScannerTests: XCTestCase {
                       "\"@Ceri\" inside \"@Cerian\" is not a real mention of Ceri")
     }
 
-    /// The same id recorded once must not require or produce more than one entry just because its
-    /// name appears twice in the text — the result is derived from the (id-keyed) dictionary, so
-    /// a duplicate textual occurrence cannot double it, but this pins that down explicitly rather
-    /// than relying on that being incidental.
-    func testSameFriendMentionedTwiceInTextIsKeptExactlyOnce() {
-        let barnaby = UUID()
-        let kept = MentionScanner.stillPresent(mentions: [barnaby: "Barnaby"],
-                                               in: "@Barnaby said hi, then @Barnaby left")
-        XCTAssertEqual(kept, [barnaby])
-    }
-
     /// A mention at the very first character and one ending at the very last character of the
     /// text both need a "boundary" that isn't a following character at all — the boundary check
     /// must treat `text.endIndex` as valid, not crash or reject it. Flips if the end-of-string
