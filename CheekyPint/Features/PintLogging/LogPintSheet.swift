@@ -27,6 +27,45 @@ func resolveIdempotencyKey(
 struct LogPintSheet: View {
     let onLogged: (PintEntry) async -> Void
 
+    private static let sanitizer = ProfileTextSanitizer()
+
+    /// `pint_entries.private_note`'s own bound: `char_length(private_note) <= 280` (a CHECK
+    /// constraint), mirrored by `create_pint_entry`'s `left(…, 280)`.
+    static let noteColumnLimit = 280
+
+    /// What is left of that 280 for the user's own words, once the longest `[Beer: …]` line the
+    /// catalog can prepend and the space joining them are accounted for.
+    ///
+    /// Derived rather than hard-coded, so adding a beer with a longer name or glass note tightens
+    /// this automatically instead of silently pushing a note that used to fit past the column bound.
+    /// It is one limit for all 98 beers rather than one per beer: the beer is not chosen until the
+    /// user taps a row, and a counter whose limit jumped around as they scrolled would be worse than
+    /// a slightly conservative one.
+    static let noteLimit = noteColumnLimit - 1 - (
+        BeerCatalog.beers
+            .map { sanitizer.sanitizedLength(BeerCatalog.beerLine(for: $0), allowNewlines: false) }
+            .max() ?? 0
+    )
+
+    /// How long the note will be **once stored**, in the code points Postgres counts. Measured with
+    /// `allowNewlines: false` because the column genuinely cannot hold a line break (see
+    /// `BeerCatalog.diaryNote`), so a typed newline becomes a space here rather than being counted
+    /// and then deleted server-side.
+    static func noteLength(of raw: String) -> Int {
+        sanitizer.sanitizedLength(raw, allowNewlines: false)
+    }
+
+    /// Logging is blocked past the limit rather than letting `left(…, 280)` drop the tail — the same
+    /// rule the composers, the report sheet and the profile screens follow.
+    static func noteWithinLimit(_ raw: String) -> Bool {
+        noteLength(of: raw) <= noteLimit
+    }
+
+    /// The note as it will be sent: Trojan-Source-stripped, whitespace-collapsed, single-line.
+    static func sanitizedNote(_ raw: String) -> String {
+        sanitizer.sanitize(raw, allowNewlines: false, maxLength: noteLimit)
+    }
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.container) private var container
 
@@ -49,6 +88,17 @@ struct LogPintSheet: View {
             Form {
                 if let errorMessage {
                     Text(errorMessage).foregroundStyle(Theme.Palette.warning)
+                        .accessibilityIdentifier("log-pint-error")
+                }
+                // Deliberately outside `detailsSection`'s DisclosureGroup, which is collapsed by
+                // default: the note gate disables every beer row, so if the only explanation lived
+                // inside the collapsed group, taps would silently do nothing.
+                if isNoteOverLimit {
+                    Text(verbatim: "Note too long: \(noteLength)/\(Self.noteLimit). Shorten it to log a beer.")
+                        .font(Theme.Typography.callout)
+                        .foregroundStyle(Theme.Palette.warning)
+                        .accessibilityIdentifier("log-pint-note-too-long")
+                        .accessibilityLabel("Note too long: \(noteLength) of \(Self.noteLimit) characters")
                 }
                 detailsSection
                 beerSection
@@ -60,6 +110,8 @@ struct LogPintSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .accessibilityIdentifier("log-pint-cancel")
+                        .accessibilityLabel("Cancel")
                 }
             }
             .overlay { if isSaving { ProgressView().tint(Theme.Palette.accent) } }
@@ -73,10 +125,15 @@ struct LogPintSheet: View {
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("log-pint-beer-search")
+                .accessibilityLabel("Search beers")
 
             // Form rows are lazy, so all 98 cost nothing until scrolled into view.
+            //
+            // Tapping a row IS the submit action here — there is no separate confirm button — so the
+            // note's length gate has to disable the rows, the way Post/Send is disabled elsewhere.
             ForEach(filteredBeers) { beer in
-                BeerRow(beer: beer, isLogging: isSaving) {
+                BeerRow(beer: beer, isDisabled: isSaving || isNoteOverLimit) {
                     Task { await log(beer) }
                 }
             }
@@ -101,14 +158,34 @@ struct LogPintSheet: View {
                            displayedComponents: [.date, .hourAndMinute])
                 TextField("Private note, just for you...", text: $note, axis: .vertical)
                     .lineLimit(1...3)
+                    .accessibilityIdentifier("log-pint-note")
+                    .accessibilityLabel("Private note")
+                HStack {
+                    Spacer(minLength: 0)
+                    // `verbatim:` — plain interpolation goes through LocalizedStringKey, which
+                    // applies the locale's digit grouping and renders a counter as "0/1.000" on a
+                    // German device. Same reason as the two composers and the report sheet.
+                    Text(verbatim: "\(noteLength)/\(Self.noteLimit)")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(isNoteOverLimit ? Theme.Palette.warning : Theme.Palette.textSecondary)
+                        .accessibilityIdentifier("log-pint-note-counter")
+                        .accessibilityLabel("\(noteLength) of \(Self.noteLimit) characters used")
+                }
             }
         } footer: {
             Text("Applies to the next beer you tap.")
         }
     }
 
+    private var noteLength: Int { Self.noteLength(of: note) }
+
+    private var isNoteOverLimit: Bool { !Self.noteWithinLimit(note) }
+
     private func log(_ beer: BeerChoice) async {
-        guard !isSaving else { return }
+        // The rows are already disabled past the limit; re-checked here for the same reason every
+        // other write surface re-checks its gate — `.disabled` is a render-time answer, and this one
+        // decides whether the tail of the note survives.
+        guard !isSaving, Self.noteWithinLimit(note) else { return }
         isSaving = true; errorMessage = nil
         defer { isSaving = false }
         // Reuse the pending key only when this is a retry of the *same* beer — the server's
@@ -121,7 +198,9 @@ struct LogPintSheet: View {
         pendingKey = newPending
         let key = IdempotencyKey(rawValue: rawKey)
         let volume = serving == .custom ? Double(customVolume) : nil
-        let cleanNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Sanitised, not merely trimmed: this text is stored, returned by the RPC and included in
+        // the Art. 15 export, and a trim leaves zero-width runs and bidi overrides untouched.
+        let cleanNote = Self.sanitizedNote(note)
         do {
             let entry = try await container.diary.createPint(
                 idempotencyKey: key,
@@ -318,10 +397,22 @@ enum BeerCatalog {
         worldBeer("generic-radler", "Radler", "Everywhere", "Radler", "Cyclist loophole", "Pale cloudy gold with soft fizz.", "A beer wearing lemonade as a disguise."),
     ]
 
+    /// The app-authored half of a diary note. Pulled out of `diaryNote` so `LogPintSheet.noteLimit`
+    /// can measure the longest one the catalog can produce — the user's own words get whatever is
+    /// left of `pint_entries.private_note`'s 280 code points.
+    static func beerLine(for beer: BeerChoice) -> String {
+        "[Beer: \(beer.name)] \(beer.glassNote)"
+    }
+
+    /// **Joined with a space, not a newline.** `create_pint_entry` runs
+    /// `strip_ugc_control_chars(p_private_note)`, which deletes `chr(10)` along with every other C0
+    /// control character, so this column cannot hold a line break: a newline separator would be
+    /// removed server-side and glue the glass note straight onto the user's first word
+    /// (`…like a witness.My round`). Pinned by `t54` in `supabase/tests/rls_rpc_suite.sql`.
     static func diaryNote(for beer: BeerChoice, userNote: String) -> String {
-        let beerLine = "[Beer: \(beer.name)] \(beer.glassNote)"
+        let beerLine = beerLine(for: beer)
         guard !userNote.isEmpty else { return beerLine }
-        return "\(beerLine)\n\(userNote)"
+        return "\(beerLine) \(userNote)"
     }
 
     static func beerName(in note: String?) -> String? {
@@ -363,7 +454,8 @@ enum BeerCatalog {
 /// target and the label reads as a verb.
 private struct BeerRow: View {
     let beer: BeerChoice
-    let isLogging: Bool
+    /// A save already in flight, or a note too long to store — either way the row must not fire.
+    let isDisabled: Bool
     let action: () -> Void
 
     var body: some View {
@@ -388,7 +480,8 @@ private struct BeerRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(isLogging)
+        .disabled(isDisabled)
+        .accessibilityIdentifier("log-pint-beer-\(beer.id)")
         .accessibilityLabel("Log \(beer.name)")
         .accessibilityHint("\(beer.country), \(beer.style)")
     }

@@ -1488,6 +1488,83 @@ do $$ declare visible int; begin
   raise notice 'PASS t52: feed_page still works — nested definer calls are unaffected';
 end $$;
 
+-- ============================ UGC STRIPPING ON THE LAST TWO RAW COLUMNS ============================
+-- An audit of every client call site that writes user-typed free text found exactly two columns
+-- unsanitised on BOTH sides: pub_sessions.name and pint_entries.private_note. Both applied only
+-- left(..., N), so the whole payload class t43e/t43f block on posts, comments and reports stayed
+-- reachable through the session and pint RPCs.
+--
+-- Same payload and same literal expectation as t43e/t43f, so if these RPCs ever diverge again from
+-- the others exactly one test fails and names the column. Both are positive assertions — write, read
+-- back, compare against a literal — so there is no `exception when others` handler to swallow them.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+
+-- t53: pub_sessions.name. This is the cross-user one: ActiveSessionView renders the name as the
+-- navigation title for every member of the session, so an unsanitised name is a payload on someone
+-- else's screen. Also pins that the 80-code-point bound and the nullif-to-NULL behaviour survive the
+-- added strip — a name of nothing but invisible characters must store NULL, not an empty string.
+do $$
+declare v jsonb; v_name text; v_payload text; v_id uuid;
+begin
+  v_payload := 'ab' || chr(8203) || 'us' || chr(8237) || 'i' || chr(8288) || 've' ||
+               chr(8294) || 'x' || chr(8297) || chr(9) || 'text';
+
+  select public.create_pub_session(null, v_payload) into v;
+  v_id := (v->>'session_id')::uuid;
+  select name into v_name from public.pub_sessions where id = v_id;
+  if v_name is distinct from 'abusivextext' then
+    raise exception 'FAIL t53: create_pub_session stored name % (want ''abusivextext'')', v_name; end if;
+
+  -- The length bound still applies on top of the stripping.
+  select public.create_pub_session(null, repeat('z', 120)) into v;
+  select name into v_name from public.pub_sessions where id = (v->>'session_id')::uuid;
+  if char_length(v_name) <> 80 then
+    raise exception 'FAIL t53: name length % (want 80)', char_length(v_name); end if;
+
+  -- A name that is nothing but invisible characters is no name at all: nullif must still see ''.
+  select public.create_pub_session(null, chr(8203) || chr(8237)) into v;
+  select name into v_name from public.pub_sessions where id = (v->>'session_id')::uuid;
+  if v_name is not null then
+    raise exception 'FAIL t53: invisible-only name stored % (want NULL)', quote_literal(v_name); end if;
+
+  raise notice 'PASS t53: create_pub_session strips control, zero-width and bidi characters from the session name';
+end $$;
+
+-- t54: pint_entries.private_note. Private to its author, but read back and displayed, and it was the
+-- last column with no strip on either side.
+--
+-- The third assertion pins the newline behaviour deliberately, because it drives a client decision:
+-- strip_ugc_control_chars deletes chr(10) along with every other C0 control character, so this column
+-- CANNOT hold a line break. LogPintSheet therefore joins its "[Beer: …]" line to the user's own words
+-- with a space; joining with a newline would have the server delete the separator and glue the two
+-- halves into one word. Asserted as the server's own behaviour rather than quietly assumed.
+do $$
+declare v jsonb; v_note text; v_payload text;
+begin
+  v_payload := 'ab' || chr(8203) || 'us' || chr(8237) || 'i' || chr(8288) || 've' ||
+               chr(8294) || 'x' || chr(8297) || chr(9) || 'text';
+
+  select public.create_pint_entry('t54-strip', now(), 'pint', null, false, null, null, v_payload) into v;
+  v_note := v->>'private_note';
+  if v_note is distinct from 'abusivextext' then
+    raise exception 'FAIL t54: create_pint_entry stored private_note % (want ''abusivextext'')', v_note; end if;
+
+  select public.create_pint_entry('t54-bound', now(), 'pint', null, false, null, null,
+                                  repeat('z', 400)) into v;
+  v_note := v->>'private_note';
+  if char_length(v_note) <> 280 then
+    raise exception 'FAIL t54: private_note length % (want 280)', char_length(v_note); end if;
+
+  select public.create_pint_entry('t54-newline', now(), 'pint', null, false, null, null,
+                                  'first' || chr(10) || 'second') into v;
+  v_note := v->>'private_note';
+  if v_note is distinct from 'firstsecond' then
+    raise exception 'FAIL t54: newline handling stored % (want ''firstsecond'' — the newline is deleted, '
+                    'so the client must not use one as a separator)', quote_literal(v_note); end if;
+
+  raise notice 'PASS t54: create_pint_entry strips control, zero-width and bidi characters from private_note, and cannot store a line break';
+end $$;
+
 reset role;
 \echo '-------------------------------------------'
 \echo 'ALL RLS/RPC CHECKS PASSED'

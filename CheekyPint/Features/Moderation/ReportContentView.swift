@@ -47,11 +47,13 @@ struct ReportContentView: View {
     ///
     /// Why this column in particular: `reports.details` is read by a **human moderator** deciding
     /// whether reported text is abusive, so a bidi-override or zero-width payload in the details is
-    /// aimed at the person adjudicating it. Unsanitised free text is not unique to this surface
-    /// (`pub_sessions.name` and `pint_entries.private_note` still go out raw at the time of
-    /// writing), but it is the one where the payload's target is the reader rather than the author.
-    /// The server halves — `strip_ugc_control_chars` in `report_post`, `report_comment` and
-    /// `report_user` — are pinned by `t43e`/`t43f` in `supabase/tests/rls_rpc_suite.sql`.
+    /// aimed at the person adjudicating it. Every column in the app that stores text a user typed now
+    /// gets the same treatment — the last two, `pub_sessions.name` and `pint_entries.private_note`,
+    /// followed in `CreateSessionView`/`LogPintSheet`. The server halves —
+    /// `strip_ugc_control_chars` in `report_post`, `report_comment`, `report_user`,
+    /// `create_pub_session` and `create_pint_entry` — are pinned by `t43e`/`t43f`/`t53`/`t54` in
+    /// `supabase/tests/rls_rpc_suite.sql`. (The six `profiles` columns are sanitised client-side only:
+    /// they are written by a plain PostgREST `PATCH`, so there is no server-side hook to add.)
     ///
     /// Returns `nil` for empty input: whitespace-only details are nothing to tell a moderator, and
     /// `nil` keeps them out of the column rather than storing an empty string.

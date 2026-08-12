@@ -1,4 +1,19 @@
 -- CheekyPint schema — 08b. RPCs: pint logging/undo, sessions, clinks, account deletion
+--
+-- Both free-text columns written from here — pub_sessions.name and pint_entries.private_note —
+-- go through public.strip_ugc_control_chars (20260101000150_common_functions.sql) before storage,
+-- like create_post's body/place label, add_comment's body and all three report RPCs' details.
+-- Previously each applied only left(..., N), which bounded the length but not the content.
+--
+-- pub_sessions.name is the one that matters most: ActiveSessionView renders it as the navigation
+-- title for **every member of the session**, so a bidi override or zero-width run in a session name
+-- is a payload displayed on other people's screens, not just the author's. private_note is private
+-- to its author, but it is read back and displayed, and there is no reason for it to be the last
+-- unsanitised column.
+--
+-- Note that strip_ugc_control_chars deletes newlines along with every other C0 control character,
+-- so neither column can store a line break. LogPintSheet composes its note accordingly (a space,
+-- not a newline, between the "[Beer: …]" line and the user's own words) — pinned by t54.
 
 -- create_pint_entry: the one true way to record a drink. Idempotent, rate-limited, server-
 -- stamped, and session-membership-validated. Returns the stored row (existing one on retry).
@@ -72,7 +87,8 @@ begin
   ) values (
     v_uid, p_pub_id, p_session_id, v_occurred, p_serving_type,
     case when p_serving_type = 'custom' then p_volume_ml else null end,
-    coalesce(p_alcohol_free, false), nullif(left(coalesce(p_private_note, ''), 280), ''),
+    coalesce(p_alcohol_free, false),
+    nullif(left(btrim(public.strip_ugc_control_chars(p_private_note)), 280), ''),
     coalesce(p_source, 'manual'), p_idempotency_key, v_flagged
   )
   on conflict (user_id, idempotency_key) do nothing
@@ -130,7 +146,8 @@ begin
   v_raw := replace(v_raw, '=', '');
 
   insert into public.pub_sessions (pub_id, host_user_id, name, join_token_hash)
-  values (p_pub_id, v_uid, nullif(left(coalesce(p_name, ''), 80), ''),
+  values (p_pub_id, v_uid,
+          nullif(left(btrim(public.strip_ugc_control_chars(p_name)), 80), ''),
           encode(extensions.digest(v_raw, 'sha256'), 'hex'))
   returning * into v_session;
 

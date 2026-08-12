@@ -136,9 +136,9 @@ final class ReportContentTests: XCTestCase {
     //
     // `reports.details` is read by a **human moderator** deciding whether reported text is abusive,
     // so a bidi override or a zero-width run in the details is a payload aimed at the person
-    // adjudicating it. Unsanitised free text is not unique to this surface —
-    // `pub_sessions.name` (SessionViews) and `pint_entries.private_note` (LogPintSheet) still go out
-    // raw at the time of writing — but it is the one where the payload's target is the reader.
+    // adjudicating it. It was not the only unsanitised surface — `pub_sessions.name` (SessionViews)
+    // and `pint_entries.private_note` (LogPintSheet) were raw on both sides too, and are covered by
+    // `FreeTextWriteSurfaceTests` — but it is the one where the payload's target is the reader.
     //
     // Because all three targets now share one `send()`, these assertions cover the user-report path
     // too; before the merge that path forwarded `details` raw with no bound. The server halves add
