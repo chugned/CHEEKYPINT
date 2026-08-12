@@ -175,8 +175,16 @@ section("Validation & sanitising") {
     let sanitizer = ProfileTextSanitizer()
     expectEqual(sanitizer.sanitizeDisplayName("Ne\u{200B}d\u{202E}im"), "Nedim", "strips zero-width/bidi")
     expectEqual(sanitizer.sanitizeDisplayName("  The   Kings\tArms  "), "The Kings Arms", "collapses whitespace")
+    // 40 as a literal, not `ProfileTextSanitizer.displayNameMaxLength`: that constant mirrors
+    // `profiles.display_name`'s `char_length(...) between 1 and 40` CHECK, so asserting it against
+    // itself passed for any value of it — including one desynchronised from the schema.
     let emoji = sanitizer.sanitizeDisplayName(String(repeating: "🍺", count: 60))
-    expectEqual(emoji.count, ProfileTextSanitizer.displayNameMaxLength, "truncates by grapheme")
+    expectEqual(emoji.count, 40, "truncates to the display-name limit without splitting an emoji")
+    expect(emoji.allSatisfy { $0 == "🍺" }, "no split emoji")
+    // NFD text is one grapheme cluster and two code points per character; Postgres counts the code
+    // points, so the budget must be in those or the CHECK constraint rejects the write outright.
+    let nfd = sanitizer.sanitizeDisplayName(String(repeating: "o\u{0308}", count: 40))
+    expectEqual(nfd.unicodeScalars.count, 40, "display name is budgeted in code points, as char_length counts")
 }
 
 section("QR tokens & deep links") {

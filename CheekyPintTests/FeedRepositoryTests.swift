@@ -7,10 +7,45 @@ import XCTest
 /// sub-second precision and lands the cursor between tied rows, silently dropping posts.
 final class FeedRepositoryTests: XCTestCase {
 
-    func testCursorPreservesTheRawTimestampString() throws {
+    /// Replaces a vacuous predecessor that built `FeedCursor(createdAt: raw, …)` and then asserted
+    /// `cursor.createdAt == raw` — `FeedCursor` is a plain struct with a memberwise init and two
+    /// `let`s, so that only asserted the language stores an argument in a property, and there was no
+    /// implementation it could fail against.
+    ///
+    /// The derivation that can actually break is `FeedPostDTO.cursor` / `PostCommentDTO.cursor`:
+    /// both must build their cursor from `createdAtRaw`, never from the `createdAt: Date?` computed
+    /// property sitting immediately above them in the same file. Routing it through `Date` is the
+    /// tempting implementation and it silently loses sub-second precision, landing the cursor
+    /// between tied rows and dropping posts — which is the whole reason `createdAtRaw` exists and
+    /// carries a hand-written `CodingKeys` exception to do so.
+    func testDTOCursorsCarryTheRawTimestampNotAReparsedDate() throws {
+        // Six fractional digits and a non-UTC offset: an ISO8601 round trip through `Date` renders
+        // this as at most three fractional digits, normalised to Z, so any reparse changes it.
         let raw = "2026-08-11T19:46:01.33476+02:00"
-        let cursor = FeedCursor(createdAt: raw, postID: UUID())
-        XCTAssertEqual(cursor.createdAt, raw, "the cursor must not reformat the server's timestamp")
+        let postID = UUID()
+        let commentID = UUID()
+
+        let post = FeedPostDTO(postId: postID, authorId: UUID(), displayName: "Barnaby",
+                               avatarPath: nil, body: "first pint", imagePath: nil, placeLabel: nil,
+                               pubId: nil, createdAtRaw: raw, cheersCount: 0, viewerHasCheered: false,
+                               commentCount: 0)
+        let comment = PostCommentDTO(commentId: commentID, authorId: UUID(), displayName: "Ceri",
+                                     avatarPath: nil, body: "cheers", createdAtRaw: raw,
+                                     mentionedUserIds: [])
+
+        XCTAssertEqual(post.cursor, FeedCursor(createdAt: raw, postID: postID),
+                       "a post's cursor must carry created_at verbatim and its own id")
+        XCTAssertEqual(comment.cursor, FeedCursor(createdAt: raw, postID: commentID),
+                       "a comment's cursor must carry created_at verbatim and the comment's id")
+
+        // The flip made explicit: `createdAt` is the reparsed form, and it must not be what the
+        // cursor is built from. Guard the fixture too — if `parseTimestamp` ever became lossless,
+        // this test would stop distinguishing the two implementations.
+        let reparsed = try XCTUnwrap(post.createdAt)
+        let reserialised = ISO8601DateFormatter().string(from: reparsed)
+        XCTAssertNotEqual(post.cursor.createdAt, reserialised,
+                          "fixture bug: the raw string must differ from its reparsed form, or this " +
+                          "test cannot tell a raw cursor from a Date-derived one")
     }
 
     func testCursorEncodesTheRawStringNotAReparsedDate() throws {
