@@ -12,11 +12,17 @@ struct FeedPostState: Identifiable, Sendable {
     let post: FeedPostDTO
     var viewerHasCheered: Bool
     var cheersCount: Int
+    /// Mirrors `viewerHasCheered`/`cheersCount`'s reasoning: `post.commentCount` is the server's
+    /// count as of the last page fetch, but `PostCommentsSheet` (opened from `FeedPostCard`) can
+    /// add or remove comments without a full feed refetch, so this mutable copy is what the card
+    /// actually displays — updated via `FeedViewModel.updateCommentCount(postID:count:)`.
+    var commentCount: Int
 
     init(_ post: FeedPostDTO) {
         self.post = post
         self.viewerHasCheered = post.viewerHasCheered
         self.cheersCount = post.cheersCount
+        self.commentCount = post.commentCount
     }
 
     var id: UUID { post.postId }
@@ -203,6 +209,14 @@ final class FeedViewModel {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return }
         posts[index].viewerHasCheered = cheered
         posts[index].cheersCount = cheersCount
+    }
+
+    /// `PostCommentsSheet`'s `onCommentCountChanged` callback, threaded through `FeedPostCard`.
+    /// A no-op if the post has since scrolled out of `posts` (e.g. paged away while the sheet was
+    /// open) — there is nothing left to update.
+    func updateCommentCount(postID: UUID, count: Int) {
+        guard let index = posts.firstIndex(where: { $0.id == postID }) else { return }
+        posts[index].commentCount = count
     }
 }
 

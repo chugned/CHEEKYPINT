@@ -9,6 +9,12 @@ struct FeedPostCard: View {
     let avatarURL: URL?
     let imageURL: URL?
     let onToggleCheers: () -> Void
+    /// Reported by `PostCommentsSheet` whenever a comment is added or deleted, so this card's
+    /// count reflects reality without the whole feed needing a refetch. Threaded through to
+    /// `FeedViewModel.updateCommentCount(postID:count:)` by whoever constructs this card.
+    let onCommentCountChanged: (Int) -> Void
+
+    @State private var showingComments = false
 
     /// Built once and reused by every row — `RelativeDateTimeFormatter` is expensive to
     /// construct, so it must never be created inside `body`, which SwiftUI re-evaluates often.
@@ -139,15 +145,26 @@ struct FeedPostCard: View {
         HStack {
             CheersButton(cheered: post.viewerHasCheered, count: post.cheersCount, action: onToggleCheers)
             Spacer(minLength: 0)
-            Label("\(post.post.commentCount)", systemImage: "bubble.right")
-                .font(Theme.Typography.caption)
-                .foregroundStyle(Theme.Palette.textSecondary)
-                .accessibilityLabel(commentCountAccessibilityLabel)
+            Button {
+                showingComments = true
+            } label: {
+                Label("\(post.commentCount)", systemImage: "bubble.right")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Palette.textSecondary)
+            }
+            .frame(minHeight: Theme.minTapTarget)
+            .contentShape(Rectangle())
+            .accessibilityIdentifier("post-comments-button")
+            .accessibilityLabel(commentCountAccessibilityLabel)
+            .accessibilityHint("Opens the comments for this post")
+        }
+        .sheet(isPresented: $showingComments) {
+            PostCommentsSheet(postID: post.id, onCommentCountChanged: onCommentCountChanged)
         }
     }
 
     private var commentCountAccessibilityLabel: String {
-        post.post.commentCount == 1 ? "1 comment" : "\(post.post.commentCount) comments"
+        post.commentCount == 1 ? "1 comment" : "\(post.commentCount) comments"
     }
 }
 

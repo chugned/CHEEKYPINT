@@ -83,7 +83,8 @@ struct FeedView: View {
                             post: post,
                             avatarURL: container.avatarURL(for: post.post.avatarPath),
                             imageURL: container.profiles.postImageURL(for: post.post.imagePath),
-                            onToggleCheers: { Task { await model.toggleCheers(post) } }
+                            onToggleCheers: { Task { await model.toggleCheers(post) } },
+                            onCommentCountChanged: { model.updateCommentCount(postID: post.id, count: $0) }
                         )
                         .listRowInsets(EdgeInsets(top: Theme.Spacing.xs, leading: Theme.Spacing.md,
                                                    bottom: Theme.Spacing.xs, trailing: Theme.Spacing.md))
