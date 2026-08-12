@@ -58,4 +58,21 @@ final class ProfileTextSanitizerTests: XCTestCase {
         XCTAssertEqual(result.count, ProfileTextSanitizer.displayNameMaxLength)
         XCTAssertTrue(result.allSatisfy { $0 == "🍺" }, "must not split the emoji into scalars")
     }
+
+    /// `sanitize(_:allowNewlines:maxLength:)` backs the feed composer's post body (limit 500,
+    /// far past `bioMaxLength`), so it must reuse `clean`'s stripping rather than route through
+    /// one of the three named, differently-limited methods above.
+    func testGenericSanitizeStripsControlCharactersAndKeepsAllowedNewlines() {
+        let dirty = "Ne\u{200B}d\u{202E}im\nSecond"
+        let result = sanitizer.sanitize(dirty, allowNewlines: true, maxLength: 500)
+        XCTAssertEqual(result, "Nedim\nSecond")
+    }
+
+    func testGenericSanitizeTruncatesToTheGivenLimitNotABuiltInOne() {
+        let long = String(repeating: "a", count: 500)
+        let result = sanitizer.sanitize(long, allowNewlines: false, maxLength: 500)
+        XCTAssertEqual(result.count, 500,
+                       "must honour the caller's own limit, not silently fall back to " +
+                       "bioMaxLength (\(ProfileTextSanitizer.bioMaxLength)) or another built-in")
+    }
 }

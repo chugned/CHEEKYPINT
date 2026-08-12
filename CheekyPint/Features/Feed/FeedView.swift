@@ -6,6 +6,7 @@ import CheekyPintCore
 struct FeedView: View {
     @Environment(\.container) private var container
     @State private var model: FeedViewModel?
+    @State private var showCompose = false
 
     var body: some View {
         NavigationStack {
@@ -22,6 +23,19 @@ struct FeedView: View {
                 ToolbarItem(placement: .principal) {
                     Wordmark(scale: .header)
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showCompose = true
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .disabled(model == nil)
+                    .accessibilityIdentifier("feed-compose")
+                    .accessibilityLabel("Compose a post")
+                }
+            }
+            .sheet(isPresented: $showCompose) {
+                ComposePostSheet(onPosted: { await model?.reload() })
             }
         }
         .task {

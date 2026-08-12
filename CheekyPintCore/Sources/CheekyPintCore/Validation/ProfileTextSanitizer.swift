@@ -29,6 +29,15 @@ public struct ProfileTextSanitizer: Sendable {
         clean(raw, allowNewlines: true, maxLength: Self.bioMaxLength)
     }
 
+    /// General-purpose cleaner for text that doesn't fit the three named profile fields above —
+    /// currently the feed composer's post body and place label, whose limits (500 / 80) mirror
+    /// server-side clamps (`left(v_body, 500)` / `left(v_label, 80)` in `create_post`) that live
+    /// with the caller, not here. Same Trojan Source stripping and whitespace collapsing as
+    /// `sanitizeDisplayName`/`sanitizeBio`, just parameterised instead of duplicated per field.
+    public func sanitize(_ raw: String, allowNewlines: Bool, maxLength: Int) -> String {
+        clean(raw, allowNewlines: allowNewlines, maxLength: maxLength)
+    }
+
     // MARK: - Core
 
     private func clean(_ raw: String, allowNewlines: Bool, maxLength: Int) -> String {

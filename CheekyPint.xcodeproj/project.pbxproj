@@ -19,6 +19,7 @@
 		1B9518160287F81B5593D4CF /* AppContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7B605D6157025E5052A6F50 /* AppContainer.swift */; };
 		1E82F0E23EB6D6A6197C1153 /* OnboardingSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73129C976C9C5C5DC90E494 /* OnboardingSupport.swift */; };
 		22319C4BBC6E59C238140D44 /* PersonalHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F90FE5789EFAAB44E55D781 /* PersonalHistoryView.swift */; };
+		22A96A4B3D521BAE182953C5 /* ComposePostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7D8490799C266AA018C6621 /* ComposePostTests.swift */; };
 		2D0C72985C3E2632DA6C069B /* FeedUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B72B647981FEDEA8D2B14AD /* FeedUITests.swift */; };
 		2EBA417F30678B235EC70817 /* BeerCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A25E072993F0DF9B435AF74 /* BeerCatalogTests.swift */; };
 		2F4CB2FBE90F249EE29E9366 /* DemoWorld.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FDC7B74515EEEC1AA3295CF /* DemoWorld.swift */; };
@@ -81,6 +82,7 @@
 		D9442B7DCBBB5D015978908B /* FeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8159546E6EE1303F51FF3E /* FeedView.swift */; };
 		DBF972A3D6C11E89B6F7D36F /* QRCodeGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DC941C300523CECA2080CDC /* QRCodeGenerator.swift */; };
 		DD1D37D14EBE2C3F83684EB8 /* MyQRView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A124A384059294BDE16FB0A4 /* MyQRView.swift */; };
+		DDB557F36733B88A60411AFB /* ComposePostSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9879D47ABAB68FD0138B436B /* ComposePostSheet.swift */; };
 		DDC2068B803392B8027B36C2 /* FriendsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBF133F807B364C56E1D65A7 /* FriendsView.swift */; };
 		E17B20249725231CDA7FA574 /* RemoteImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0CCF8937EF44EB8232679D5 /* RemoteImage.swift */; };
 		E67DD41875328A944A6D46FE /* LeaderboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE91445C93DDF5189EFBC2E0 /* LeaderboardView.swift */; };
@@ -160,6 +162,7 @@
 		92B264CA1989F6776444F735 /* PubsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PubsView.swift; sourceTree = "<group>"; };
 		92F0B2D8EC8B2BE4982FB23A /* demo-pint.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "demo-pint.png"; sourceTree = "<group>"; };
 		93C8D775D6CB641A5C876957 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		9879D47ABAB68FD0138B436B /* ComposePostSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposePostSheet.swift; sourceTree = "<group>"; };
 		992A7152E72932A1AD45B8E7 /* DeleteAccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteAccountView.swift; sourceTree = "<group>"; };
 		9A04B8A45B27EB5E594B5172 /* ProfileRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileRepository.swift; sourceTree = "<group>"; };
 		9AA85C3CBCA4166E5CCFB23B /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
@@ -170,6 +173,7 @@
 		A124A384059294BDE16FB0A4 /* MyQRView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyQRView.swift; sourceTree = "<group>"; };
 		A28C4771ADDE62DBDEE18120 /* EditProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditProfileView.swift; sourceTree = "<group>"; };
 		A493EAA559F914C8DE9005DA /* PubsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PubsRepository.swift; sourceTree = "<group>"; };
+		A7D8490799C266AA018C6621 /* ComposePostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposePostTests.swift; sourceTree = "<group>"; };
 		ABC3041556D23C7B3E1BFCE4 /* OnboardingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingUITests.swift; sourceTree = "<group>"; };
 		AE19D454DDC06A49CAC8D711 /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
 		AF84E8BCF22797D2F92B1FCD /* RPCContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCContracts.swift; sourceTree = "<group>"; };
@@ -509,6 +513,7 @@
 			children = (
 				0B485E248E225AAA60C16019 /* AppSmokeTests.swift */,
 				0A25E072993F0DF9B435AF74 /* BeerCatalogTests.swift */,
+				A7D8490799C266AA018C6621 /* ComposePostTests.swift */,
 				3790C1282D2C4B39809DB396 /* DeleteAccountWiringTests.swift */,
 				8431B3781C6DDB129D65C967 /* DemoComposeTests.swift */,
 				1872FAFB6961D5A9CADF105A /* FeedPagingTests.swift */,
@@ -563,6 +568,7 @@
 		F53736E8C9E30748ACECDC72 /* Feed */ = {
 			isa = PBXGroup;
 			children = (
+				9879D47ABAB68FD0138B436B /* ComposePostSheet.swift */,
 				34A42488FE5DD8A2106C873D /* FeedPostCard.swift */,
 				9B8159546E6EE1303F51FF3E /* FeedView.swift */,
 				E7632253847C92DD56B89FD0 /* FeedViewModel.swift */,
@@ -703,6 +709,7 @@
 			files = (
 				F4EDDCADA7B3D1DAE9F8FB5E /* AppSmokeTests.swift in Sources */,
 				2EBA417F30678B235EC70817 /* BeerCatalogTests.swift in Sources */,
+				22A96A4B3D521BAE182953C5 /* ComposePostTests.swift in Sources */,
 				AC2CCC69E150D6A237283A4A /* DeleteAccountWiringTests.swift in Sources */,
 				3698D7635FFEB1217ED4FC8F /* DemoComposeTests.swift in Sources */,
 				EF477088B5EF2B3E9E798050 /* FeedPagingTests.swift in Sources */,
@@ -725,6 +732,7 @@
 				8B587A71D2A1C8BD5B106DED /* BlockedUsersView.swift in Sources */,
 				3D794374FD18A3D493F6A463 /* CheekyPintApp.swift in Sources */,
 				F3E2D020F54C7E1899BCA5A4 /* Components.swift in Sources */,
+				DDB557F36733B88A60411AFB /* ComposePostSheet.swift in Sources */,
 				16FEE497622C5F68DCC4A339 /* CryptoNonce.swift in Sources */,
 				93DA601A08AFD9F06E357FE5 /* DeleteAccountView.swift in Sources */,
 				2F4CB2FBE90F249EE29E9366 /* DemoWorld.swift in Sources */,

@@ -107,6 +107,14 @@ final class FeedViewModel {
         await fetchFirstPage()
     }
 
+    /// Called after a successful compose (`ComposePostSheet.onPosted`). A freshly created post
+    /// sorts to the head of the feed by `created_at`, so re-fetching page one — the same fetch
+    /// `refresh()` already does for pull-to-refresh — is enough to surface it, with no separate
+    /// "prepend one post locally" path that could drift from the server's own ordering/dedup.
+    func reload() async {
+        await refresh()
+    }
+
     private func fetchFirstPage() async {
         do {
             let page = try await pageRequest(nil, pageSize)
