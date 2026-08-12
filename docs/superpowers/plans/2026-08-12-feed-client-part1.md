@@ -428,6 +428,7 @@ git commit -m "feat: add the feed data layer with demo-mode support"
 **Files:**
 - Modify: `CheekyPint/Core/Networking/ImageLoader.swift`
 - Modify: `CheekyPint/Core/Database/ProfileRepository.swift`
+- Modify: `CheekyPint/Core/Networking/SupabaseData.swift` (add `objectURL(bucket:path:)`)
 - Modify: `CheekyPint/App/CheekyPintApp.swift` (or wherever the container is constructed — read it first)
 - Modify: `CheekyPintTests/FeedRepositoryTests.swift` (add a URL-shape test)
 
