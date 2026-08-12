@@ -13,19 +13,23 @@ struct MainTabView: View {
                 .tabItem { Label("Logger", systemImage: "mug.fill") }
                 .tag(0)
 
+            FeedView()
+                .tabItem { Label("Feed", systemImage: "square.stack") }
+                .tag(1)
+
             NavigationStack {
                 if let profile = session.currentProfile {
                     LeaderboardView(profile: profile)
                 }
             }
             .tabItem { Label("Leaderboard", systemImage: "trophy.fill") }
-            .tag(1)
+            .tag(2)
 
             NavigationStack {
                 SettingsView()
             }
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-            .tag(2)
+            .tag(3)
         }
         .tint(Theme.Palette.accent)
     }
