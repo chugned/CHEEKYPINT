@@ -100,6 +100,17 @@ struct ProfileRepository: Sendable {
         try await data.invokeFunctionVoid("delete-account")
     }
 
+    /// `<uid>/<uuid>.jpg` — mirrors `ComposePostSheet.storagePath(uid:)`'s shape and its
+    /// lowercase requirement: the `avatars` storage policies
+    /// (`20260101000950_storage.sql:21,26,27,31`) compare the folder segment to `auth.uid()::text`
+    /// with plain `text` equality, and Postgres always renders that lowercase while
+    /// `UUID.uuidString` is always uppercase. Extracted to a pure static function — same reason
+    /// `storagePath` is static on `ComposePostSheet` — so the shape is testable without a network
+    /// call.
+    static func avatarStoragePath(uid: UUID) -> String {
+        "\(uid.uuidString.lowercased())/\(UUID().uuidString.lowercased()).jpg"
+    }
+
     /// Upload a resized JPEG avatar into the caller's own folder and point the profile at it.
     @discardableResult
     func uploadAvatar(_ jpeg: Data) async throws -> String {
@@ -109,7 +120,7 @@ struct ProfileRepository: Sendable {
             return path
         }
         let id = try await uid()
-        let path = "\(id)/\(UUID().uuidString).jpg"
+        let path = Self.avatarStoragePath(uid: id)
         _ = try await data.uploadObject(bucket: "avatars", path: path, data: jpeg, contentType: "image/jpeg")
         _ = try await updateProfile(ProfileUpdate(avatarPath: path))
         return path

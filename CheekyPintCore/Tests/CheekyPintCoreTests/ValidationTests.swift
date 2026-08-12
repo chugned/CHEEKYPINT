@@ -69,7 +69,9 @@ final class ProfileTextSanitizerTests: XCTestCase {
     }
 
     func testGenericSanitizeTruncatesToTheGivenLimitNotABuiltInOne() {
-        let long = String(repeating: "a", count: 500)
+        // 600 in, must come back at exactly 500: feeding exactly the limit would pass whether
+        // truncation runs or was deleted entirely, so this must overshoot it.
+        let long = String(repeating: "a", count: 600)
         let result = sanitizer.sanitize(long, allowNewlines: false, maxLength: 500)
         XCTAssertEqual(result.count, 500,
                        "must honour the caller's own limit, not silently fall back to " +

@@ -44,6 +44,14 @@ enum Theme {
         static let xxl: CGFloat = 48
     }
 
+    /// Fixed heights for image tiles whose height is independent of the source photo's aspect
+    /// ratio (see `FeedPostCard.photoHeight`'s doc for why fixing the height matters). One place
+    /// for these instead of a local magic number at each call site.
+    enum Sizing {
+        /// The composer's picked-photo thumbnail (`ComposePostSheet`).
+        static let photoPreview: CGFloat = 160
+    }
+
     /// Corner-radius scale — rounded but not bubbly.
     enum Radius {
         static let sm: CGFloat = 10

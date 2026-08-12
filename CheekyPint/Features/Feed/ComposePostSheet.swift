@@ -19,12 +19,30 @@ struct ComposePostSheet: View {
         hasPhoto || !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Whether Post should be enabled: `canPost`'s "photo or words" gate, plus the over-limit
+    /// guard the body counter also reflects. Static (like `canPost`/`storagePath`) so "501
+    /// characters blocks submission" is testable without a view instance — disabling Post past
+    /// `bodyLimit` rather than letting the server's `left(v_body, 500)` clamp silently drop the
+    /// tail of what the user typed.
+    static func canSubmit(body: String, hasPhoto: Bool) -> Bool {
+        canPost(body: body, hasPhoto: hasPhoto) && body.count <= bodyLimit
+    }
+
     /// `<uid>/<uuid>.jpg` — `create_post` checks the first folder segment against
     /// `auth.uid()::text` and rejects any path containing `..`. Mirrors
-    /// `ProfileRepository.uploadAvatar` (`ProfileRepository.swift:104-116`), which builds exactly
-    /// this shape for avatars.
+    /// `ProfileRepository.avatarStoragePath`, which builds exactly this shape for avatars.
+    ///
+    /// **Both segments are lowercased.** `UUID.uuidString` is always uppercase
+    /// (`586C6ED5-6494-...`), but Postgres always renders `auth.uid()::text` lowercase, and every
+    /// comparison against it — the `post-images` storage policies
+    /// (`20260811000200_feed_storage.sql:20,25,26,30`) and `create_post`'s own ownership guard
+    /// (`20260811000500_rpc_feed_posts.sql:53`) — is plain `text` equality, not `citext`, with no
+    /// `lower()` call anywhere. An uppercase folder segment fails RLS on upload and, if that were
+    /// somehow bypassed, fails `create_post`'s guard too — so real (non-demo) photo posting could
+    /// never succeed before this fix. The filename segment's case doesn't matter to any check;
+    /// it's lowercased too purely for consistency with the folder segment.
     static func storagePath(uid: UUID) -> String {
-        "\(uid.uuidString)/\(UUID().uuidString).jpg"
+        "\(uid.uuidString.lowercased())/\(UUID().uuidString.lowercased()).jpg"
     }
 
     let onPosted: () async -> Void
@@ -98,7 +116,7 @@ struct ComposePostSheet: View {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFill()
-                    .frame(maxWidth: .infinity, minHeight: 160, maxHeight: 160)
+                    .frame(maxWidth: .infinity, minHeight: Theme.Sizing.photoPreview, maxHeight: Theme.Sizing.photoPreview)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
                     .accessibilityHidden(true)
                 Button(role: .destructive) {
@@ -149,7 +167,7 @@ struct ComposePostSheet: View {
     private var isOverLimit: Bool { postBody.count > Self.bodyLimit }
 
     private var canSubmit: Bool {
-        Self.canPost(body: postBody, hasPhoto: photoJPEG != nil) && !isOverLimit
+        Self.canSubmit(body: postBody, hasPhoto: photoJPEG != nil)
     }
 
     // MARK: - Actions
