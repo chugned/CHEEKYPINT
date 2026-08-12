@@ -44,7 +44,7 @@ struct FriendProfileView: View {
                 } label: { Image(systemName: "ellipsis.circle") }
             }
         }
-        .sheet(isPresented: $showReport) { ReportUserView(userID: userID) }
+        .sheet(isPresented: $showReport) { ReportContentView(target: .user(id: userID)) }
         .task { await load() }
     }
 

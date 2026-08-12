@@ -7,28 +7,9 @@
 -- and writes go through the security-definer RPCs, which decide visibility via
 -- public.is_accepted_friend() (already block-aware in both directions).
 
--- Shared sanitiser for user-supplied text. Deletes C0/C1 control characters plus the
--- zero-width and bidi-override characters used to spoof or scramble displayed text.
-create or replace function public.strip_ugc_control_chars(t text)
-returns text
-language sql
-immutable
-set search_path = ''
-as $$
-  select regexp_replace(
-           translate(
-             coalesce(t, ''),
-             chr(8203) || chr(8204) || chr(8205) || chr(8206) || chr(8207) ||
-             chr(8234) || chr(8235) || chr(8236) || chr(8237) || chr(8238) || chr(65279) ||
-             chr(8288) || chr(8294) || chr(8295) || chr(8296) || chr(8297),
-             ''
-           ),
-           '[[:cntrl:]]', '', 'g'
-         );
-$$;
-
-comment on function public.strip_ugc_control_chars(text) is
-  'Strips control, zero-width and bidi characters from user-supplied text.';
+-- public.strip_ugc_control_chars — the shared free-text sanitiser the RPCs below call — is
+-- defined in 20260101000150_common_functions.sql, alongside its grants, because report_user in
+-- 20260101000800_rpc_social.sql also calls it.
 
 create table public.posts (
   id uuid primary key default gen_random_uuid(),
@@ -100,5 +81,3 @@ revoke all on table public.post_cheers from public, anon, authenticated;
 revoke all on table public.post_comments from public, anon, authenticated;
 revoke all on table public.comment_mentions from public, anon, authenticated;
 
-revoke all on function public.strip_ugc_control_chars(text) from public, anon;
-grant execute on function public.strip_ugc_control_chars(text) to authenticated;

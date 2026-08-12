@@ -858,6 +858,39 @@ begin
   raise notice 'PASS t43e: report_post/report_comment strip control, zero-width and bidi characters from details';
 end $$;
 
+-- t43f: the same requirement for report_user, which writes the SAME reports.details column read by
+-- the SAME human moderator, but was left out when t43e's fix landed — it still did
+-- left(coalesce(p_details, ''), 1000) with no strip_ugc_control_chars, so the whole payload class
+-- t43e blocks on the two content paths stayed reachable through the user-report path
+-- (FriendProfileView → ReportUserView → report_user).
+--
+-- Deliberately identical payload and identical literal expectation to t43e: if the three report
+-- RPCs ever diverge again on this column, exactly one of the two tests fails and names which path
+-- regressed. No `exception when others` handler here — this is a positive assertion (store, read
+-- back, compare against a literal), so there is no handler to swallow it.
+--
+-- Alice has filed 4 successful reports by this point (t41, t43e×3); the 'report' rate limit is
+-- 20/hour, so the two calls below stay well inside it.
+do $$
+declare v jsonb; v_details text; v_payload text;
+begin
+  v_payload := 'ab' || chr(8203) || 'us' || chr(8237) || 'i' || chr(8288) || 've' ||
+               chr(8294) || 'x' || chr(8297) || chr(9) || 'text';
+
+  select public.report_user('00000000-0000-4000-8000-0000000000b2', 'inappropriate_text', v_payload) into v;
+  select details into v_details from public.reports where id = (v->>'report_id')::uuid;
+  if v_details is distinct from 'abusivextext' then
+    raise exception 'FAIL t43f: report_user stored details % (want ''abusivextext'')', v_details; end if;
+
+  -- The length bound still applies on top of the stripping, as it did before.
+  select public.report_user('00000000-0000-4000-8000-0000000000b2', 'other', repeat('z', 1500)) into v;
+  select details into v_details from public.reports where id = (v->>'report_id')::uuid;
+  if char_length(v_details) <> 1000 then
+    raise exception 'FAIL t43f: details length % (want 1000)', char_length(v_details); end if;
+
+  raise notice 'PASS t43f: report_user strips control, zero-width and bidi characters from details';
+end $$;
+
 -- ============================ FEED: comment_count block/soft-delete parity (I1) ============================
 -- feed_page's comment_count previously counted every non-deleted comment regardless of the
 -- viewer's relationship to the comment's author, while post_comments_page (the actual thread

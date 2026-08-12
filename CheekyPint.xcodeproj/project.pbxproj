@@ -79,7 +79,6 @@
 		A46C8F427C3284A54D3C7C21 /* PintPourView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22111C12A6569AAF398C360B /* PintPourView.swift */; };
 		A50ABB43266BF70A73F1CD61 /* PostCommentsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F7E533FFB68AE0D607CE84E /* PostCommentsViewModelTests.swift */; };
 		A9D2045D746CF4F4E495DF93 /* LegalDocumentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FE2EBAF2631120634D10BD9 /* LegalDocumentView.swift */; };
-		AAD1081504F7466674B9481D /* ReportUserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE5D8680C57253489F8ED93F /* ReportUserView.swift */; };
 		AC2CCC69E150D6A237283A4A /* DeleteAccountWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3790C1282D2C4B39809DB396 /* DeleteAccountWiringTests.swift */; };
 		AEDFC5D78379A7892E004150 /* PrivacyChoicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 400FCC410C9213C6AA6E9B1B /* PrivacyChoicesView.swift */; };
 		B7C2E9813A10407284B257F3 /* SupabaseAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7273023994D1632D9EE2E815 /* SupabaseAuth.swift */; };
@@ -235,7 +234,6 @@
 		FC1D204FB60B2CB58469EAF2 /* AddFriendView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddFriendView.swift; sourceTree = "<group>"; };
 		FD5E60AF6993540C66EAC663 /* Staging.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Staging.xcconfig; sourceTree = "<group>"; };
 		FE0FF3B5C0498BC5CC031F95 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		FE5D8680C57253489F8ED93F /* ReportUserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportUserView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -445,7 +443,6 @@
 			isa = PBXGroup;
 			children = (
 				C417C695216C7E4003C958B2 /* ReportContentView.swift */,
-				FE5D8680C57253489F8ED93F /* ReportUserView.swift */,
 			);
 			path = Moderation;
 			sourceTree = "<group>";
@@ -835,7 +832,6 @@
 				A25BAC1DA5559DEAB54D535F /* RemoteAvatar.swift in Sources */,
 				E17B20249725231CDA7FA574 /* RemoteImage.swift in Sources */,
 				3368B55AC99AE6EB55753290 /* ReportContentView.swift in Sources */,
-				AAD1081504F7466674B9481D /* ReportUserView.swift in Sources */,
 				4514F01F901E0578E765433B /* RootView.swift in Sources */,
 				5FA9B27853B3A2B1A9923C87 /* SessionController.swift in Sources */,
 				4279C0921BBA29012FF0FD3D /* SessionViews.swift in Sources */,
