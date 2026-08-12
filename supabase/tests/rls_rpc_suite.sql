@@ -1229,7 +1229,16 @@ end $$;
 -- non-vacuous, foreign-tainted data so its ownership assertion can actually fire.
 
 -- t51 setup (Alice): a fresh post to cheer/comment on, a comment mentioning her friend
--- Barnaby, a report she files against him, a pub preference, and a Nudge to him.
+-- Barnaby, a report she files against him, a pub preference, a Nudge to him, and a pint entry
+-- carrying a private note.
+--
+-- The noted entry exists because nothing anywhere asserted that private_note survives into the
+-- Art. 15 export: the seeded entries all leave the column NULL, so dropping
+-- `'private_note', e.private_note` from export_my_data left this suite green. It is the one column
+-- in pint_entries that holds the user's own words, so its absence from a data export would be the
+-- omission a data-subject request would actually notice. Every exact pint-count assertion in this
+-- suite (t5's `v_alice <> 3`, the `count(*) <> 4` RLS check) runs far earlier than this, so the
+-- extra row cannot disturb them.
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 do $$ declare v jsonb; v_post uuid; begin
   select public.create_post('t51 fixture: alice export post', null, null, null) into v;
@@ -1243,7 +1252,9 @@ do $$ declare v jsonb; v_post uuid; begin
   values ('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-00000000e001', true)
   on conflict (user_id, pub_id) do update set hidden_from_favourites = true;
   perform public.send_nudge('00000000-0000-4000-8000-0000000000b2');
-  raise notice 'PASS t51 setup: Alice creates a fixture post, cheers it, comments mentioning Barnaby, reports Barnaby, sets a pub preference, and Nudges Barnaby';
+  perform public.create_pint_entry('t51-noted', now(), 'pint', null, false, null, null,
+                                   't51 fixture: alice private note');
+  raise notice 'PASS t51 setup: Alice creates a fixture post, cheers it, comments mentioning Barnaby, reports Barnaby, sets a pub preference, Nudges Barnaby, and logs a pint with a private note';
 end $$;
 
 -- t51 setup (Barnaby): cheers Alice's fixture post (I1 — a foreign cheerer on a post Alice
@@ -1312,7 +1323,15 @@ do $$ declare v jsonb; v_fixture_comment jsonb; begin
   if jsonb_typeof(v->'pint_entries') is distinct from 'array' then
     raise exception 'FAIL t51: pint_entries is not an array'; end if;
   if jsonb_array_length(v->'pint_entries') < 1 then
-    raise exception 'FAIL t51: export contains no pint entries for a user who has 4'; end if;
+    raise exception 'FAIL t51: export contains no pint entries for a user who has 5'; end if;
+
+  -- Art. 15: the note is the only free text in a pint entry, so it must be IN the export. Asserted
+  -- against the fixture's literal text, not merely "the key exists", so exporting a NULL for a row
+  -- that has a note fails too.
+  if not exists (
+    select 1 from jsonb_array_elements(v->'pint_entries') e
+     where (e->>'private_note') = 't51 fixture: alice private note'
+  ) then raise exception 'FAIL t51: export dropped pint_entries.private_note (Art. 15)'; end if;
 
   -- The export must be caller-scoped: no other user's rows may appear, in ANY collection — a
   -- missing auth.uid() filter anywhere is a data breach, not just an over-return. Every
