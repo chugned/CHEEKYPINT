@@ -129,12 +129,27 @@ struct ProfileRepository: Sendable {
     /// `avatarURL` above — this must go through the authenticated `/object/<bucket>/<path>` route
     /// rather than `/object/public/...`, which cannot serve a private bucket. `avatars` remaining
     /// public while `post-images` is private is deliberate and tracked, not an oversight.
+    ///
+    /// Demo/friend-circle mode's seeded photo needs the same `local-*/` escape hatch `avatarURL`
+    /// uses below: friend-circle mode is a real user-facing mode that must need no backend, but
+    /// without this a seeded `imagePath` shaped like a real storage path (e.g.
+    /// `"<uid>/demo-pint.jpg"`) turns into a genuine Supabase Storage URL and gets fetched with no
+    /// session — which is why that post used to render "Photo unavailable" instead of a photo.
+    /// `postImageURL` is a plain sync function (called straight from `FeedView`'s body), so this
+    /// checks the path's own shape rather than `DemoWorld.shared.isActive` — that's actor-isolated
+    /// state a sync function can't `await`.
     func postImageURL(for path: String?) -> URL? {
         guard let path else { return nil }
+        if path.hasPrefix(Self.localPostImagePrefix) {
+            let filename = String(path.dropFirst(Self.localPostImagePrefix.count))
+            return Bundle.main.url(forResource: (filename as NSString).deletingPathExtension,
+                                   withExtension: (filename as NSString).pathExtension)
+        }
         return data.objectURL(bucket: "post-images", path: path)
     }
 
     private static let localAvatarPrefix = "local-avatar/"
+    static let localPostImagePrefix = "local-post-image/"
 
     private static func writeLocalAvatar(_ jpeg: Data) throws -> String {
         let filename = "\(UUID().uuidString).jpg"

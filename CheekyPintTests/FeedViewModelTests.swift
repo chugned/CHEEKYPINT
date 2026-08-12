@@ -48,4 +48,50 @@ final class FeedViewModelTests: XCTestCase {
         XCTAssertEqual(updated.cheersCount, 7,
                        "must match the server's response (7), not the optimistic guess (1)")
     }
+
+    /// The ordering half of the Cheers bug, left open by the reconciliation fix above: each tap
+    /// used to spawn its own unguarded `Task`, so two rapid taps on the *same* post raced two
+    /// requests over one HTTP/2 connection with no ordering guarantee. If the second request's
+    /// reply (say, "off") landed before the first's ("on"), `reconcile` applied whichever arrived
+    /// last — reconciling from a response doesn't help when the wrong response is the one that
+    /// arrives last. `FeedViewModel` now tracks per-post in-flight state and ignores a tap on a
+    /// post that already has one outstanding, which removes the race by construction: at most one
+    /// request per post can ever be outstanding, so there is nothing left to arrive out of order.
+    /// This test proves that by forcing two taps to overlap and asserting only one request fires;
+    /// without the in-flight guard, both taps reach the injected closure and this fails 2 != 1.
+    func testConcurrentCheersTapsOnTheSamePostIgnoreTheSecondWhileOneIsOutstanding() async throws {
+        await DemoWorld.shared.activate(surname: "Alice")
+        defer { Task { await DemoWorld.shared.deactivate() } }
+
+        let config = AppConfig(environment: .development,
+                               supabaseURL: URL(string: "https://unreachable.invalid")!,
+                               supabaseAnonKey: "k", universalHost: "unreachable.invalid")
+        let container = AppContainer(config: config)
+
+        var callCount = 0
+        let model = FeedViewModel(container: container, toggleCheers: { _ in
+            callCount += 1
+            // Long enough that, without the in-flight guard, a second concurrent tap reaches
+            // this closure before the first call below has a chance to return.
+            try await Task.sleep(nanoseconds: 100_000_000)
+            return ToggleCheersDTO(cheered: true, cheersCount: 1)
+        })
+        await model.load()
+
+        guard let target = model.posts.first else {
+            XCTFail("expected at least one seeded post")
+            return
+        }
+
+        // Two taps issued back-to-back, exactly as two fast taps on the same button would: each
+        // becomes its own `Task` in `FeedView`'s `onToggleCheers` closure, with nothing between
+        // them.
+        async let first: Void = model.toggleCheers(target)
+        async let second: Void = model.toggleCheers(target)
+        _ = await (first, second)
+
+        XCTAssertEqual(callCount, 1,
+                       "a second tap on a post with a Cheers request already outstanding must be " +
+                       "ignored rather than firing its own request")
+    }
 }

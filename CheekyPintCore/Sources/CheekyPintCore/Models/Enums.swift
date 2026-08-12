@@ -43,6 +43,7 @@ public enum EntrySource: String, Codable, CaseIterable, Sendable {
 /// Report categories for user-generated-content moderation.
 public enum ReportCategory: String, Codable, CaseIterable, Sendable {
     case inappropriateProfileImage = "inappropriate_profile_image"
+    case inappropriatePostImage = "inappropriate_post_image"
     case inappropriateText = "inappropriate_text"
     case harassment
     case impersonation
@@ -52,6 +53,7 @@ public enum ReportCategory: String, Codable, CaseIterable, Sendable {
     public var displayName: String {
         switch self {
         case .inappropriateProfileImage: return "Inappropriate profile image"
+        case .inappropriatePostImage: return "Inappropriate post photo"
         case .inappropriateText: return "Inappropriate text"
         case .harassment: return "Harassment"
         case .impersonation: return "Impersonation"

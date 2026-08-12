@@ -35,6 +35,8 @@ struct CheekyPintApp: App {
         await ImageLoader.shared.setTokenProvider { [auth = container.auth] in
             try? await auth.validAccessToken()
         }
+        // The only host the bearer token may ever be sent to (see ImageLoader.allowedTokenHost).
+        await ImageLoader.shared.setAllowedHost(container.config.storageURL.host)
     }
 
     /// The custom URL scheme remains only for authentication callbacks.

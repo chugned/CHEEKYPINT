@@ -42,22 +42,47 @@ final class FeedViewModel {
 
     private let pageSize: Int
 
-    /// The one seam this view model needs for testing: how a Cheers tap is sent. Defaults to
-    /// the real repository call; a test can inject a canned response instead, without a protocol
-    /// hierarchy or a mock framework, to prove reconciliation reads from *that* response rather
-    /// than from the optimistic guess computed before it arrives.
+    /// The one seam this view model needs for testing Cheers: how a Cheers tap is sent. Defaults
+    /// to the real repository call; a test can inject a canned response instead, without a
+    /// protocol hierarchy or a mock framework, to prove reconciliation reads from *that* response
+    /// rather than from the optimistic guess computed before it arrives.
     private let toggleCheersRequest: (UUID) async throws -> ToggleCheersDTO
 
+    /// The seam for testing paging, mirroring `toggleCheersRequest` above. Defaults to the real
+    /// repository call; a test can inject canned pages to assert the cursor sent on the *second*
+    /// call is the first page's last post's `createdAtRaw` byte-for-byte, and that appending a
+    /// page that repeats a row (the documented, accepted `feed_page` failure mode — see
+    /// `20260811000500_rpc_feed_posts.sql`) doesn't duplicate it client-side.
+    private let pageRequest: (FeedCursor?, Int) async throws -> [FeedPostDTO]
+
+    /// Posts with a Cheers toggle currently in flight. Each tap used to spawn an independent,
+    /// unguarded `Task`, so two rapid taps on the same post raced two requests over one HTTP/2
+    /// connection with no ordering guarantee — if the second request (say, the "un-cheer") landed
+    /// before the first ("cheer"), `reconcile` would apply whichever arrived last and leave the UI
+    /// showing the opposite of what the server actually holds. Reconciling from the response (the
+    /// earlier fix) closed "trusting the optimistic guess"; it did nothing about "two requests
+    /// racing" — this set closes that: a tap on a post already in this set is ignored outright
+    /// rather than firing a second request that could return out of order. A monotonic sequence
+    /// number checked in `reconcile` was the other option considered; ignoring is simpler and
+    /// removes the race by construction instead of merely detecting and discarding a stale reply,
+    /// and a toggle mid-flight has no well-defined "what should a second tap even do" answer to
+    /// preserve by queuing or coalescing it.
+    private var cheersInFlight: Set<UUID> = []
+
     init(container: AppContainer, pageSize: Int = 20,
-         toggleCheers: ((UUID) async throws -> ToggleCheersDTO)? = nil) {
+         toggleCheers: ((UUID) async throws -> ToggleCheersDTO)? = nil,
+         page: ((FeedCursor?, Int) async throws -> [FeedPostDTO])? = nil) {
         self.container = container
         self.pageSize = pageSize
         self.toggleCheersRequest = toggleCheers ?? { try await container.feed.toggleCheers(postID: $0) }
+        self.pageRequest = page ?? { cursor, limit in try await container.feed.page(before: cursor, limit: limit) }
     }
 
     /// First load. Clears any existing posts up front so a retry after an error doesn't show
-    /// stale content next to the error state.
+    /// stale content next to the error state. Guarded by the same `isLoading` flag as `refresh()`
+    /// and `loadMore()` (see the note there) so this can't race either of them.
     func load() async {
+        guard !isLoading else { return }
         isLoading = true
         loadError = nil
         posts = []
@@ -67,16 +92,32 @@ final class FeedViewModel {
 
     /// Pull-to-refresh. Same first page as `load()`, but posts are only replaced once the new
     /// page arrives, so the list doesn't flash empty while it's in flight.
+    ///
+    /// Shares `isLoading` with `load()`/`loadMore()` — it used to not set the flag at all, so it
+    /// sailed straight past `loadMore`'s in-flight guard. A user paged to cursor p40, still
+    /// waiting on a slow `loadMore` reply, who pulled to refresh would see `refresh` land first
+    /// and replace `posts` with `[p1...p20]`; `loadMore`'s reply then arrived and appended
+    /// `p41...p60` on top of that, silently dropping `p21...p40`. One shared flag makes `refresh`
+    /// and `loadMore` mutually exclusive instead of two independent writers to the same array.
     func refresh() async {
+        guard !isLoading else { return }
+        isLoading = true
         loadError = nil
+        defer { isLoading = false }
         await fetchFirstPage()
     }
 
     private func fetchFirstPage() async {
         do {
-            let page = try await container.feed.page(before: nil, limit: pageSize)
+            let page = try await pageRequest(nil, pageSize)
             posts = page.map(FeedPostState.init)
             hasMore = page.count == pageSize
+        } catch let cancellation where cancellation.isCancellation {
+            // Switching tabs cancels this screen's `.task` mid-fetch (see `FeedView`). That's an
+            // interruption, not a failure the user asked about — leaving `loadError`/`posts`
+            // untouched (rather than the generic "Couldn't load the feed") means returning to the
+            // tab sees an empty, error-free state and `FeedView` retries cleanly instead of
+            // flashing a stale network error it never actually had.
         } catch let error as SupabaseError {
             loadError = error
         } catch {
@@ -85,19 +126,35 @@ final class FeedViewModel {
     }
 
     /// Infinite scroll. No-op while a load is already in flight or once a short page has said
-    /// there is nothing more.
+    /// there is nothing more. Appends with de-duplication by id: `feed_page`'s compound
+    /// `(created_at, id)` cursor can still repeat a tied row across pages by design when a caller
+    /// sends an incomplete cursor (see the SQL migration's own note), and that failure mode is
+    /// only "recoverable client-side" if the client actually dedupes — it didn't.
     func loadMore() async {
         guard !isLoading, hasMore, let cursor = posts.last?.cursor else { return }
         isLoading = true
         defer { isLoading = false }
         do {
-            let page = try await container.feed.page(before: cursor, limit: pageSize)
-            posts.append(contentsOf: page.map(FeedPostState.init))
+            let page = try await pageRequest(cursor, pageSize)
+            appendDeduplicated(page.map(FeedPostState.init))
             hasMore = page.count == pageSize
+        } catch let cancellation where cancellation.isCancellation {
+            // See the matching catch in `fetchFirstPage()` — a cancelled page fetch (e.g. the
+            // screen disappearing mid-scroll) isn't a failure worth surfacing in the footer.
         } catch let error as SupabaseError {
             loadError = error
         } catch {
             loadError = .unknown("Couldn't load more posts.")
+        }
+    }
+
+    /// Appends `newPosts`, skipping any id already present — either already in `posts` (a repeat
+    /// across pages) or repeated within `newPosts` itself (a repeat within one page).
+    private func appendDeduplicated(_ newPosts: [FeedPostState]) {
+        var seenIDs = Set(posts.map(\.id))
+        for post in newPosts where !seenIDs.contains(post.id) {
+            posts.append(post)
+            seenIDs.insert(post.id)
         }
     }
 
@@ -108,8 +165,15 @@ final class FeedViewModel {
     /// `cheered`/`cheersCount`, a double-tap would leave the UI showing "cheered" while the
     /// server actually landed on "not cheered". On failure, the optimistic flip is rolled back
     /// and the error is surfaced without disturbing the rest of the feed.
+    ///
+    /// Ignores a tap on a post that already has one outstanding (see `cheersInFlight`'s doc) —
+    /// reconciling from *a* response doesn't help if the wrong one arrives last.
     func toggleCheers(_ post: FeedPostState) async {
         guard let index = posts.firstIndex(where: { $0.id == post.id }) else { return }
+        guard !cheersInFlight.contains(post.id) else { return }
+        cheersInFlight.insert(post.id)
+        defer { cheersInFlight.remove(post.id) }
+
         let previousCheered = posts[index].viewerHasCheered
         let previousCount = posts[index].cheersCount
         posts[index].viewerHasCheered.toggle()
@@ -131,5 +195,16 @@ final class FeedViewModel {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return }
         posts[index].viewerHasCheered = cheered
         posts[index].cheersCount = cheersCount
+    }
+}
+
+private extension Error {
+    /// True for both `CancellationError` (thrown at a cooperative-cancellation checkpoint) and
+    /// `URLError.cancelled` (what `URLSession`'s async APIs throw when the owning `Task` is
+    /// cancelled mid-request) — the two shapes a cancelled feed fetch actually arrives in.
+    var isCancellation: Bool {
+        if self is CancellationError { return true }
+        if let urlError = self as? URLError, urlError.code == .cancelled { return true }
+        return false
     }
 }

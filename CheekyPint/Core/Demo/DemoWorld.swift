@@ -153,9 +153,19 @@ actor DemoWorld {
                              cheers: 2, cheered: true)
         let barnabyPost = post(90, author: Self.barnabyID,
                                body: "Snapped this one before it went flat.",
-                               imagePath: "\(Self.barnabyID.uuidString)/demo-pint.jpg")
+                               imagePath: ProfileRepository.localPostImagePrefix + "demo-pint.png")
         let ceriPost = post(180, author: Self.ceriID, body: "Quiet one tonight.")
-        feedPosts = [alicePost, barnabyPost, ceriPost]
+        // Filler posts, older than all three named posts above so they never bump Alice's/
+        // Barnaby's/Ceri's out of page one: `FeedViewModel`'s default `pageSize` is 20, and until
+        // now demo mode only ever seeded 3 posts total, so `feedPage`'s cursor branch (`p_before`
+        // non-nil) and `loadMore`'s append/`hasMore` recomputation had zero execution in any
+        // suite — the branch's headline data-path claim, untested. 20 fillers (23 posts total)
+        // makes `loadMore` genuinely fire against the real demo backend: page one is full at 20,
+        // `hasMore` is true, and page two carries the remaining 3.
+        let fillerPosts = (0..<20).map { index in
+            post(180 + Double(index + 1) * 60, author: Self.ceriID, body: "Another quiet one, #\(index + 1).")
+        }
+        feedPosts = [alicePost, barnabyPost, ceriPost] + fillerPosts
 
         let commentAt = now.addingTimeInterval(-20 * 60)
         feedComments = [

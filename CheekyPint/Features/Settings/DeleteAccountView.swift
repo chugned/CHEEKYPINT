@@ -56,6 +56,10 @@ struct DeleteAccountView: View {
             // partway (e.g. after anonymising but before the auth-user delete), it throws and
             // the catch below reports it; nothing here treats a partial run as success.
             try await container.profiles.deleteAccount()
+            // Explicit here too (not just inside `signOut()` below): account deletion is its own
+            // flow, and a future refactor to how it signs out shouldn't silently stop clearing a
+            // cache full of the deleted account's private post photos.
+            await ImageLoader.shared.clear()
             await session.signOut()
         } catch let error as SupabaseError {
             errorMessage = error.friendlyMessage

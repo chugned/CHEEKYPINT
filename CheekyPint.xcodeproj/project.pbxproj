@@ -44,6 +44,7 @@
 		66FEE24D402E0551291B4B0D /* LeaderboardRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = F195336553E97CFAE69B74BD /* LeaderboardRepository.swift */; };
 		67D2581D727E7635247B3753 /* AddFriendView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC1D204FB60B2CB58469EAF2 /* AddFriendView.swift */; };
 		68AFEB7D15AF98C3C416924B /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D693B5BFB92FFAF57CB2BC50 /* AuthView.swift */; };
+		6F396835EAD4790FBC086BBA /* demo-pint.png in Resources */ = {isa = PBXBuildFile; fileRef = 92F0B2D8EC8B2BE4982FB23A /* demo-pint.png */; };
 		736923CBCA7304F839E05CFC /* HomeComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C159334B37CFC7DAA096E37 /* HomeComponents.swift */; };
 		7408DAB2C8540B6B0726A74F /* LogPintSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ECE41FEB04B0962570C1EC0 /* LogPintSheet.swift */; };
 		781A531724339765DA90487D /* WelcomeFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8956EEBDE28461F82148694 /* WelcomeFlowView.swift */; };
@@ -84,6 +85,7 @@
 		E67DD41875328A944A6D46FE /* LeaderboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE91445C93DDF5189EFBC2E0 /* LeaderboardView.swift */; };
 		E78FAFD4C9EF851833EA669B /* FeedViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E5EFD7C3D050A64AB9145D7 /* FeedViewModelTests.swift */; };
 		E7FDA70C1116D7F8AED59B1A /* SessionsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF16E8A74CEE2149C589D7CF /* SessionsRepository.swift */; };
+		EF477088B5EF2B3E9E798050 /* FeedPagingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1872FAFB6961D5A9CADF105A /* FeedPagingTests.swift */; };
 		F3E2D020F54C7E1899BCA5A4 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62F18CEF001837B238A2C78C /* Components.swift */; };
 		F4EDDCADA7B3D1DAE9F8FB5E /* AppSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B485E248E225AAA60C16019 /* AppSmokeTests.swift */; };
 		F74A4CE5753D52298F021FA9 /* FeedRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C49867E1056C19580C9661C /* FeedRepositoryTests.swift */; };
@@ -119,6 +121,7 @@
 		0C159334B37CFC7DAA096E37 /* HomeComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeComponents.swift; sourceTree = "<group>"; };
 		0F90FE5789EFAAB44E55D781 /* PersonalHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalHistoryView.swift; sourceTree = "<group>"; };
 		10FB87EB91062CB8BCF9088F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		1872FAFB6961D5A9CADF105A /* FeedPagingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedPagingTests.swift; sourceTree = "<group>"; };
 		18C3DC3EF2DC4E52955FF13C /* CheekyPint-personal.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "CheekyPint-personal.entitlements"; sourceTree = "<group>"; };
 		1A39C87CFB49B270966A7716 /* FriendsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsRepository.swift; sourceTree = "<group>"; };
 		1D6AFC9DE60A85058380FA9B /* PrivacySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacySettingsView.swift; sourceTree = "<group>"; };
@@ -153,6 +156,7 @@
 		8E8C8934C61E9AA06217C902 /* DiaryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryRepository.swift; sourceTree = "<group>"; };
 		91BD3AF0DFABFB5854C87176 /* Production.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Production.xcconfig; sourceTree = "<group>"; };
 		92B264CA1989F6776444F735 /* PubsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PubsView.swift; sourceTree = "<group>"; };
+		92F0B2D8EC8B2BE4982FB23A /* demo-pint.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "demo-pint.png"; sourceTree = "<group>"; };
 		93C8D775D6CB641A5C876957 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		992A7152E72932A1AD45B8E7 /* DeleteAccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteAccountView.swift; sourceTree = "<group>"; };
 		9A04B8A45B27EB5E594B5172 /* ProfileRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileRepository.swift; sourceTree = "<group>"; };
@@ -373,6 +377,14 @@
 			path = CheekyPint;
 			sourceTree = "<group>";
 		};
+		7D79B6ADB3A9B6C60994C097 /* DemoAssets */ = {
+			isa = PBXGroup;
+			children = (
+				92F0B2D8EC8B2BE4982FB23A /* demo-pint.png */,
+			);
+			path = DemoAssets;
+			sourceTree = "<group>";
+		};
 		8796B17304E3E7AA1061FD80 /* Friends */ = {
 			isa = PBXGroup;
 			children = (
@@ -420,6 +432,7 @@
 			isa = PBXGroup;
 			children = (
 				DB143012D24C69CA81717590 /* Config */,
+				7D79B6ADB3A9B6C60994C097 /* DemoAssets */,
 				C447DCFC028E06121698A7DB /* Fonts */,
 				FE0FF3B5C0498BC5CC031F95 /* Assets.xcassets */,
 				18C3DC3EF2DC4E52955FF13C /* CheekyPint-personal.entitlements */,
@@ -495,6 +508,7 @@
 				0B485E248E225AAA60C16019 /* AppSmokeTests.swift */,
 				0A25E072993F0DF9B435AF74 /* BeerCatalogTests.swift */,
 				3790C1282D2C4B39809DB396 /* DeleteAccountWiringTests.swift */,
+				1872FAFB6961D5A9CADF105A /* FeedPagingTests.swift */,
 				4C49867E1056C19580C9661C /* FeedRepositoryTests.swift */,
 				2E5EFD7C3D050A64AB9145D7 /* FeedViewModelTests.swift */,
 				BFDD087F4855721B840E53DE /* IdempotencyKeyRetryTests.swift */,
@@ -673,6 +687,7 @@
 				CC4032FC0B02D6D6BDD8E0DC /* OFL.txt in Resources */,
 				982E6F4DED407608BB6C11F9 /* Preview Assets.xcassets in Resources */,
 				60C1CA754117A072F6D185DB /* PrivacyInfo.xcprivacy in Resources */,
+				6F396835EAD4790FBC086BBA /* demo-pint.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -686,6 +701,7 @@
 				F4EDDCADA7B3D1DAE9F8FB5E /* AppSmokeTests.swift in Sources */,
 				2EBA417F30678B235EC70817 /* BeerCatalogTests.swift in Sources */,
 				AC2CCC69E150D6A237283A4A /* DeleteAccountWiringTests.swift in Sources */,
+				EF477088B5EF2B3E9E798050 /* FeedPagingTests.swift in Sources */,
 				F74A4CE5753D52298F021FA9 /* FeedRepositoryTests.swift in Sources */,
 				E78FAFD4C9EF851833EA669B /* FeedViewModelTests.swift in Sources */,
 				D727F36985DE6EBE31FA8872 /* IdempotencyKeyRetryTests.swift in Sources */,

@@ -71,6 +71,10 @@ final class SessionController {
     func signOut() async {
         await DemoWorld.shared.deactivate()
         await container.auth.signOut()
+        // A private post photo (post-images bucket) must not survive the session that could see
+        // it — see ImageLoader.clear()'s doc. Sign-out is the common exit from any authenticated
+        // session, so this is the primary place that guarantee is enforced.
+        await ImageLoader.shared.clear()
         UserDefaults.standard.removeObject(forKey: surnameKey)
         pendingAgeConfirmed = false
         phase = .signedOut
