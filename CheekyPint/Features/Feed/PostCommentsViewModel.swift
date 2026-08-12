@@ -120,7 +120,7 @@ final class PostCommentsViewModel {
         defer { isLoading = false }
         do {
             let page = try await commentsRequest(postID, cursor, pageSize)
-            appendDeduplicated(page)
+            comments.appendDeduplicated(page)
             if let lastServerComment = page.last { pagingCursor = lastServerComment.cursor }
             hasMore = page.count == pageSize
         } catch let cancellation where cancellation.isCancellation {
@@ -144,14 +144,6 @@ final class PostCommentsViewModel {
             loadError = error
         } catch {
             loadError = .unknown("Couldn't load comments.")
-        }
-    }
-
-    private func appendDeduplicated(_ newComments: [PostCommentDTO]) {
-        var seenIDs = Set(comments.map(\.id))
-        for comment in newComments where !seenIDs.contains(comment.id) {
-            comments.append(comment)
-            seenIDs.insert(comment.id)
         }
     }
 
@@ -255,16 +247,5 @@ final class PostCommentsViewModel {
     func suggestions(for token: String) -> [FriendDTO] {
         guard !token.isEmpty else { return friends }
         return friends.filter { $0.displayName.localizedCaseInsensitiveContains(token) }
-    }
-}
-
-private extension Error {
-    /// True for both `CancellationError` and `URLError.cancelled` — see the identical extension
-    /// (and its doc) in `FeedViewModel.swift`; duplicated per-file rather than shared, matching
-    /// that file's own `private` (file-scoped) visibility.
-    var isCancellation: Bool {
-        if self is CancellationError { return true }
-        if let urlError = self as? URLError, urlError.code == .cancelled { return true }
-        return false
     }
 }

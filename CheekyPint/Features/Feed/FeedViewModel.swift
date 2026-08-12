@@ -239,7 +239,7 @@ final class FeedViewModel {
         defer { isLoading = false }
         do {
             let page = try await pageRequest(cursor, pageSize)
-            appendDeduplicated(page.map(FeedPostState.init))
+            posts.appendDeduplicated(page.map(FeedPostState.init))
             hasMore = page.count == pageSize
         } catch let cancellation where cancellation.isCancellation {
             // See the matching catch in `fetchFirstPage()` — a cancelled page fetch (e.g. the
@@ -248,16 +248,6 @@ final class FeedViewModel {
             loadError = error
         } catch {
             loadError = .unknown("Couldn't load more posts.")
-        }
-    }
-
-    /// Appends `newPosts`, skipping any id already present — either already in `posts` (a repeat
-    /// across pages) or repeated within `newPosts` itself (a repeat within one page).
-    private func appendDeduplicated(_ newPosts: [FeedPostState]) {
-        var seenIDs = Set(posts.map(\.id))
-        for post in newPosts where !seenIDs.contains(post.id) {
-            posts.append(post)
-            seenIDs.insert(post.id)
         }
     }
 
@@ -333,16 +323,5 @@ final class FeedViewModel {
         } catch {
             deleteError = "Couldn't delete that post. Please try again."
         }
-    }
-}
-
-private extension Error {
-    /// True for both `CancellationError` (thrown at a cooperative-cancellation checkpoint) and
-    /// `URLError.cancelled` (what `URLSession`'s async APIs throw when the owning `Task` is
-    /// cancelled mid-request) — the two shapes a cancelled feed fetch actually arrives in.
-    var isCancellation: Bool {
-        if self is CancellationError { return true }
-        if let urlError = self as? URLError, urlError.code == .cancelled { return true }
-        return false
     }
 }

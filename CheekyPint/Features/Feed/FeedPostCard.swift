@@ -32,25 +32,6 @@ struct FeedPostCard: View {
         session.currentProfile?.id == post.post.authorId
     }
 
-    /// Built once and reused by every row — `RelativeDateTimeFormatter` is expensive to
-    /// construct, so it must never be created inside `body`, which SwiftUI re-evaluates often.
-    /// Abbreviated for the visible caption ("30 min. ago" rather than `Text(_:style:.relative)`'s
-    /// "30 min, 7 secs"/"1 hr, 30 min" compound form).
-    private static let relativeTimeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter
-    }()
-
-    /// Same formatter, spelled out in full, for VoiceOver — an abbreviated unit read aloud
-    /// ("30 min ago") is worse than the full word ("30 minutes ago"), so the accessibility label
-    /// uses this one instead of the visible text.
-    private static let relativeTimeAccessibilityFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return formatter
-    }()
-
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             header
@@ -70,10 +51,10 @@ struct FeedPostCard: View {
                     .font(Theme.Typography.headline)
                     .foregroundStyle(Theme.Palette.textPrimary)
                 if let createdAt = post.post.createdAt {
-                    Text(Self.relativeTimeFormatter.localizedString(for: createdAt, relativeTo: Date()))
+                    Text(RelativeTime.caption.localizedString(for: createdAt, relativeTo: Date()))
                         .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.Palette.textSecondary)
-                        .accessibilityLabel(Self.relativeTimeAccessibilityFormatter.localizedString(
+                        .accessibilityLabel(RelativeTime.accessibility.localizedString(
                             for: createdAt, relativeTo: Date()))
                 }
             }

@@ -150,21 +150,6 @@ struct PostCommentsSheet: View {
         }
     }
 
-    /// Built once and reused by every row, matching `FeedPostCard`'s identical formatters (see
-    /// that type's doc for why: `RelativeDateTimeFormatter` is expensive to construct and must
-    /// never be created inside `body`).
-    private static let relativeTimeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter
-    }()
-
-    private static let relativeTimeAccessibilityFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return formatter
-    }()
-
     private func commentRow(_ comment: PostCommentDTO, model: PostCommentsViewModel) -> some View {
         HStack(alignment: .top, spacing: Theme.Spacing.sm) {
             RemoteAvatar(url: container.avatarURL(for: comment.avatarPath), name: comment.displayName, size: 32)
@@ -174,10 +159,10 @@ struct PostCommentsSheet: View {
                         .font(Theme.Typography.headline)
                         .foregroundStyle(Theme.Palette.textPrimary)
                     if let createdAt = comment.createdAt {
-                        Text(Self.relativeTimeFormatter.localizedString(for: createdAt, relativeTo: Date()))
+                        Text(RelativeTime.caption.localizedString(for: createdAt, relativeTo: Date()))
                             .font(Theme.Typography.caption)
                             .foregroundStyle(Theme.Palette.textSecondary)
-                            .accessibilityLabel(Self.relativeTimeAccessibilityFormatter.localizedString(
+                            .accessibilityLabel(RelativeTime.accessibility.localizedString(
                                 for: createdAt, relativeTo: Date()))
                     }
                 }

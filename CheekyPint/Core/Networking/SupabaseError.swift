@@ -55,6 +55,26 @@ enum SupabaseError: Error, Equatable {
     }
 }
 
+extension Error {
+    /// True for both `CancellationError` (thrown at a cooperative-cancellation checkpoint) and
+    /// `URLError.cancelled` (what `URLSession`'s async APIs throw when the owning `Task` is
+    /// cancelled mid-request) — the two shapes a cancelled request from this networking layer
+    /// actually arrives in.
+    ///
+    /// Lives here, next to `SupabaseError`, because that two-case fact is a property of this
+    /// networking stack, not of any one screen. `FeedViewModel` and `PostCommentsViewModel` each
+    /// carried a verbatim `private extension` copy; two owners of one fact about the layer beneath
+    /// them is exactly the shape that drifts when a third cancellation representation turns up.
+    ///
+    /// Callers use it to distinguish "the user navigated away mid-fetch" — an interruption, not a
+    /// failure worth surfacing — from a real error.
+    var isCancellation: Bool {
+        if self is CancellationError { return true }
+        if let urlError = self as? URLError, urlError.code == .cancelled { return true }
+        return false
+    }
+}
+
 /// The shape PostgREST / RPC errors come back in.
 struct PostgRESTError: Decodable {
     let message: String?

@@ -29,6 +29,26 @@ final class FeedPagingTests: XCTestCase {
                    commentCount: 0)
     }
 
+    /// `Array.appendDeduplicated` is now one shared helper behind both keyset-paged readers
+    /// (`FeedViewModel.loadMore` and `PostCommentsViewModel.loadMore`), replacing a near-verbatim
+    /// private copy in each. `testLoadMoreAppendsWithoutDuplicatingARowRepeatedAcrossPages` below
+    /// covers the cross-page repeat those copies existed for; this covers the two halves of the
+    /// contract that call site can't reach — a repeat *within* one page, and the "first occurrence
+    /// wins" positioning that keeps an already-displayed row where the user last saw it.
+    func testAppendDeduplicatedDropsRepeatsWithinOnePageAndKeepsFirstOccurrenceOrder() {
+        let a = post(createdAtRaw: "2026-08-12T12:00:03.000Z")
+        let b = post(createdAtRaw: "2026-08-12T12:00:02.000Z")
+        let c = post(createdAtRaw: "2026-08-12T12:00:01.000Z")
+
+        var list = [a, b].map(FeedPostState.init)
+        // `b` repeats a row already present; `c` appears twice within this one batch.
+        list.appendDeduplicated([b, c, c].map(FeedPostState.init))
+
+        XCTAssertEqual(list.map(\.id), [a.postId, b.postId, c.postId],
+                       "a row repeated within one batch must be appended once, and `b` must stay " +
+                       "in its original position rather than being moved by the later repeat")
+    }
+
     /// `feed_page` orders `(created_at, id)` descending, so the cursor for the *next* page must
     /// be the *last* (oldest) post of the page just received — and it must carry that post's raw
     /// `created_at` string byte-for-byte, not a value reparsed through `Date` (which would lose
