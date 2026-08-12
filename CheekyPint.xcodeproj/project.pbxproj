@@ -55,6 +55,7 @@
 		93DA601A08AFD9F06E357FE5 /* DeleteAccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 992A7152E72932A1AD45B8E7 /* DeleteAccountView.swift */; };
 		965E7CBE1E967AA28E7BB991 /* PintGlass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3872330003B170A384111360 /* PintGlass.swift */; };
 		982E6F4DED407608BB6C11F9 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 57A823DF518C2C34044FD7C6 /* Preview Assets.xcassets */; };
+		9A777015E52EEC9DE7E64EE4 /* FeedRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FA31333111DB6B77346249F /* FeedRepository.swift */; };
 		9D264DA547507A32E22B56DD /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE35C031D8F5446061595412 /* AnalyticsService.swift */; };
 		A25BAC1DA5559DEAB54D535F /* RemoteAvatar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C8A77C910ED5B58DECC0A8 /* RemoteAvatar.swift */; };
 		A46C8F427C3284A54D3C7C21 /* PintPourView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22111C12A6569AAF398C360B /* PintPourView.swift */; };
@@ -80,6 +81,7 @@
 		E7FDA70C1116D7F8AED59B1A /* SessionsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF16E8A74CEE2149C589D7CF /* SessionsRepository.swift */; };
 		F3E2D020F54C7E1899BCA5A4 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62F18CEF001837B238A2C78C /* Components.swift */; };
 		F4EDDCADA7B3D1DAE9F8FB5E /* AppSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B485E248E225AAA60C16019 /* AppSmokeTests.swift */; };
+		F74A4CE5753D52298F021FA9 /* FeedRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C49867E1056C19580C9661C /* FeedRepositoryTests.swift */; };
 		FAA228A2DCEF9D5F1E703FB1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FE0FF3B5C0498BC5CC031F95 /* Assets.xcassets */; };
 		FB3A90802981976CA3C3AB2A /* PubPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FA2BCD1FC71F9B892EAA2C4 /* PubPickerView.swift */; };
 /* End PBXBuildFile section */
@@ -128,12 +130,14 @@
 		400FCC410C9213C6AA6E9B1B /* PrivacyChoicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyChoicesView.swift; sourceTree = "<group>"; };
 		41EBFE10658C54A9DC938EC4 /* ScreenshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotTests.swift; sourceTree = "<group>"; };
 		427CE67174F944D3571BA68C /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		4C49867E1056C19580C9661C /* FeedRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedRepositoryTests.swift; sourceTree = "<group>"; };
 		4E1EBF06157D81B3B210A5EF /* CryptoNonce.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptoNonce.swift; sourceTree = "<group>"; };
 		5397DFD01084A4E0BBA5A266 /* AuthSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSession.swift; sourceTree = "<group>"; };
 		57A823DF518C2C34044FD7C6 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		62F18CEF001837B238A2C78C /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		683A6EF3431E9BC51B963C51 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		6ECE41FEB04B0962570C1EC0 /* LogPintSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogPintSheet.swift; sourceTree = "<group>"; };
+		6FA31333111DB6B77346249F /* FeedRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedRepository.swift; sourceTree = "<group>"; };
 		7273023994D1632D9EE2E815 /* SupabaseAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseAuth.swift; sourceTree = "<group>"; };
 		730EF203CA9747BBEC5A88DA /* CheekyPintApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheekyPintApp.swift; sourceTree = "<group>"; };
 		7DC941C300523CECA2080CDC /* QRCodeGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeGenerator.swift; sourceTree = "<group>"; };
@@ -427,6 +431,7 @@
 			isa = PBXGroup;
 			children = (
 				8E8C8934C61E9AA06217C902 /* DiaryRepository.swift */,
+				6FA31333111DB6B77346249F /* FeedRepository.swift */,
 				1A39C87CFB49B270966A7716 /* FriendsRepository.swift */,
 				F195336553E97CFAE69B74BD /* LeaderboardRepository.swift */,
 				9A04B8A45B27EB5E594B5172 /* ProfileRepository.swift */,
@@ -479,6 +484,7 @@
 				0B485E248E225AAA60C16019 /* AppSmokeTests.swift */,
 				0A25E072993F0DF9B435AF74 /* BeerCatalogTests.swift */,
 				3790C1282D2C4B39809DB396 /* DeleteAccountWiringTests.swift */,
+				4C49867E1056C19580C9661C /* FeedRepositoryTests.swift */,
 				BFDD087F4855721B840E53DE /* IdempotencyKeyRetryTests.swift */,
 			);
 			path = CheekyPintTests;
@@ -657,6 +663,7 @@
 				F4EDDCADA7B3D1DAE9F8FB5E /* AppSmokeTests.swift in Sources */,
 				2EBA417F30678B235EC70817 /* BeerCatalogTests.swift in Sources */,
 				AC2CCC69E150D6A237283A4A /* DeleteAccountWiringTests.swift in Sources */,
+				F74A4CE5753D52298F021FA9 /* FeedRepositoryTests.swift in Sources */,
 				D727F36985DE6EBE31FA8872 /* IdempotencyKeyRetryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -679,6 +686,7 @@
 				2F4CB2FBE90F249EE29E9366 /* DemoWorld.swift in Sources */,
 				78BA3290D2CF7943C44E2865 /* DiaryRepository.swift in Sources */,
 				BFBA9EEAAF2CBF212725A4CF /* EditProfileView.swift in Sources */,
+				9A777015E52EEC9DE7E64EE4 /* FeedRepository.swift in Sources */,
 				C49AF8863772058146A69379 /* FriendPreviewView.swift in Sources */,
 				535018F9F1C3600D23B758AD /* FriendProfileView.swift in Sources */,
 				5DFC91ABF83B6CCDCAC06166 /* FriendsRepository.swift in Sources */,

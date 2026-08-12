@@ -24,6 +24,7 @@ struct AppContainer: Sendable {
     var friendActivity: FriendActivityRepository { FriendActivityRepository(data: data) }
     var pubs: PubsRepository { PubsRepository(data: data) }
     var sessions: SessionsRepository { SessionsRepository(data: data) }
+    var feed: FeedRepository { FeedRepository(data: data) }
 
     let deepLinkParser = DeepLinkParser()
 

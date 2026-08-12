@@ -33,6 +33,8 @@ actor DemoWorld {
     private var session: PubSession?
     private var pubs: [UUID: Pub] = [:]
     private var nudges: [DemoNudge] = []
+    private var feedPosts: [DemoPost] = []
+    private var feedComments: [DemoComment] = []
 
     private struct DemoNudge {
         let id: UUID
@@ -40,6 +42,41 @@ actor DemoWorld {
         let recipientID: UUID
         let createdAt: Date
     }
+
+    /// A demo feed post. Deliberately its own shape (not `FeedPostDTO`): `displayName` and
+    /// `avatarPath` are resolved from `authorID` at read time via `feedDisplayName`/
+    /// `feedAvatarPath` so Alice's own posts stay in sync with a surname entered after seeding,
+    /// and `commentCount` is derived from `feedComments` rather than stored, so `addComment`/
+    /// `deleteComment` can't drift out of sync with the count they imply.
+    private struct DemoPost {
+        let id: UUID
+        let authorID: UUID
+        var body: String?
+        var imagePath: String?
+        var placeLabel: String?
+        let pubID: UUID?
+        let createdAt: Date
+        let createdAtRaw: String
+        var cheersCount: Int
+        var viewerHasCheered: Bool
+        var deletedAt: Date?
+    }
+
+    private struct DemoComment {
+        let id: UUID
+        let postID: UUID
+        let authorID: UUID
+        let body: String
+        let createdAt: Date
+        let createdAtRaw: String
+        let mentionedUserIds: [UUID]
+        var deletedAt: Date?
+    }
+
+    /// Matches production formatting closely enough for round-trip purposes: fixed-width
+    /// fractional seconds in a fixed (UTC) offset, so lexical and chronological order agree —
+    /// `feedPage`'s cursor comparison relies on that for its own bookkeeping here.
+    private static let feedTimestampStyle = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
 
     var currentProfile: Profile { profile }
 
@@ -96,6 +133,36 @@ actor DemoWorld {
                 recipientID: Self.aliceID,
                 createdAt: now.addingTimeInterval(-8 * 60)
             )
+        ]
+
+        // Three posts of varied shape, so paging/ordering/toggle are all exercisable offline:
+        // Alice's carries a place label, two Cheers (one of them the viewer's own, so both
+        // toggle directions are reachable by hand) and the one seeded comment; Barnaby's
+        // carries a photo path instead of a place; Ceri's is plain text only.
+        func post(_ minsAgo: Double, author: UUID, body: String?, imagePath: String? = nil,
+                  placeLabel: String? = nil, pubID: UUID? = nil, cheers: Int = 0, cheered: Bool = false) -> DemoPost {
+            let createdAt = now.addingTimeInterval(-minsAgo * 60)
+            return DemoPost(id: UUID(), authorID: author, body: body, imagePath: imagePath,
+                            placeLabel: placeLabel, pubID: pubID, createdAt: createdAt,
+                            createdAtRaw: Self.feedTimestampStyle.format(createdAt),
+                            cheersCount: cheers, viewerHasCheered: cheered, deletedAt: nil)
+        }
+        let alicePost = post(30, author: Self.aliceID,
+                             body: "Friday pint at the usual spot — cheers all round!",
+                             placeLabel: "The Kings Arms, London", pubID: Self.kingsPubID,
+                             cheers: 2, cheered: true)
+        let barnabyPost = post(90, author: Self.barnabyID,
+                               body: "Snapped this one before it went flat.",
+                               imagePath: "\(Self.barnabyID.uuidString)/demo-pint.jpg")
+        let ceriPost = post(180, author: Self.ceriID, body: "Quiet one tonight.")
+        feedPosts = [alicePost, barnabyPost, ceriPost]
+
+        let commentAt = now.addingTimeInterval(-20 * 60)
+        feedComments = [
+            DemoComment(id: UUID(), postID: alicePost.id, authorID: Self.barnabyID,
+                       body: "Get one in for me!", createdAt: commentAt,
+                       createdAtRaw: Self.feedTimestampStyle.format(commentAt),
+                       mentionedUserIds: [], deletedAt: nil)
         ]
     }
 
@@ -281,6 +348,97 @@ actor DemoWorld {
                     createdAt: item.createdAt
                 )
             }
+    }
+
+    // MARK: Feed
+
+    func feedPage(before cursor: FeedCursor?, limit: Int) -> [FeedPostDTO] {
+        let cursorKey: (Date, String)? = cursor.flatMap { c in
+            SupabaseJSON.parseTimestamp(c.createdAt).map { ($0, c.postID.uuidString) }
+        }
+        return feedPosts
+            .filter { $0.deletedAt == nil }
+            .filter { post in
+                guard let cursorKey else { return true }
+                return (post.createdAt, post.id.uuidString) < cursorKey
+            }
+            .sorted { ($0.createdAt, $0.id.uuidString) > ($1.createdAt, $1.id.uuidString) }
+            .prefix(max(limit, 0))
+            .map(feedPostDTO)
+    }
+
+    func comments(postID: UUID) -> [PostCommentDTO] {
+        feedComments
+            .filter { $0.postID == postID && $0.deletedAt == nil }
+            .sorted { ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString) }
+            .map { comment in
+                PostCommentDTO(commentId: comment.id, authorId: comment.authorID,
+                               displayName: feedDisplayName(for: comment.authorID),
+                               avatarPath: feedAvatarPath(for: comment.authorID),
+                               body: comment.body, createdAtRaw: comment.createdAtRaw,
+                               mentionedUserIds: comment.mentionedUserIds)
+            }
+    }
+
+    func toggleCheers(postID: UUID) -> ToggleCheersDTO {
+        guard let index = feedPosts.firstIndex(where: { $0.id == postID }) else {
+            return ToggleCheersDTO(cheered: false, cheersCount: 0)
+        }
+        feedPosts[index].viewerHasCheered.toggle()
+        feedPosts[index].cheersCount = max(0, feedPosts[index].cheersCount + (feedPosts[index].viewerHasCheered ? 1 : -1))
+        return ToggleCheersDTO(cheered: feedPosts[index].viewerHasCheered, cheersCount: feedPosts[index].cheersCount)
+    }
+
+    func createPost(body: String?, imagePath: String?, placeLabel: String?) -> UUID {
+        let createdAt = Date()
+        let newPost = DemoPost(id: UUID(), authorID: Self.aliceID, body: body, imagePath: imagePath,
+                               placeLabel: placeLabel, pubID: nil, createdAt: createdAt,
+                               createdAtRaw: Self.feedTimestampStyle.format(createdAt),
+                               cheersCount: 0, viewerHasCheered: false, deletedAt: nil)
+        feedPosts.insert(newPost, at: 0)
+        return newPost.id
+    }
+
+    func deletePost(_ postID: UUID) {
+        guard let index = feedPosts.firstIndex(where: { $0.id == postID }) else { return }
+        feedPosts[index].deletedAt = Date()
+    }
+
+    func addComment(postID: UUID, body: String, mentions: [UUID]) -> UUID {
+        let createdAt = Date()
+        let comment = DemoComment(id: UUID(), postID: postID, authorID: Self.aliceID, body: body,
+                                  createdAt: createdAt, createdAtRaw: Self.feedTimestampStyle.format(createdAt),
+                                  mentionedUserIds: mentions, deletedAt: nil)
+        feedComments.append(comment)
+        return comment.id
+    }
+
+    func deleteComment(_ commentID: UUID) {
+        guard let index = feedComments.firstIndex(where: { $0.id == commentID }) else { return }
+        feedComments[index].deletedAt = Date()
+    }
+
+    private func feedDisplayName(for userID: UUID) -> String {
+        switch userID {
+        case Self.aliceID: return profile.displayName
+        case Self.barnabyID: return "Barnaby"
+        case Self.ceriID: return "Ceri"
+        default: return "Mate"
+        }
+    }
+
+    private func feedAvatarPath(for userID: UUID) -> String? {
+        userID == Self.aliceID ? profile.avatarPath : nil
+    }
+
+    private func feedPostDTO(_ post: DemoPost) -> FeedPostDTO {
+        FeedPostDTO(postId: post.id, authorId: post.authorID,
+                    displayName: feedDisplayName(for: post.authorID),
+                    avatarPath: feedAvatarPath(for: post.authorID),
+                    body: post.body, imagePath: post.imagePath, placeLabel: post.placeLabel,
+                    pubId: post.pubID, createdAtRaw: post.createdAtRaw,
+                    cheersCount: post.cheersCount, viewerHasCheered: post.viewerHasCheered,
+                    commentCount: feedComments.filter { $0.postID == post.id && $0.deletedAt == nil }.count)
     }
 
     // MARK: Leaderboard (uses the real tested builder)

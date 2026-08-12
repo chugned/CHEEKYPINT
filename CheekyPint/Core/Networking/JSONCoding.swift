@@ -41,4 +41,12 @@ enum SupabaseJSON {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter
     }()
+
+    /// Parses a Postgres `timestamptz` for display. Reuses the two formatters this enum already
+    /// defines for its custom `dateDecodingStrategy` — Postgres trims trailing fractional zeros,
+    /// so the sub-second digit count varies per row and one formatter cannot cover both forms.
+    /// Display only: the cursor always carries the raw string.
+    static func parseTimestamp(_ raw: String) -> Date? {
+        iso8601.date(from: raw) ?? iso8601NoFraction.date(from: raw)
+    }
 }

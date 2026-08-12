@@ -37,6 +37,16 @@ struct SupabaseData: Sendable {
 
     func rpcVoid(_ function: String) async throws { try await rpcVoid(function, params: EmptyBody()) }
 
+    /// Call a function and return its response body unparsed. Used by `export_my_data`, whose
+    /// caller (Art. 15/20 self-export) must hand the user the exact document the server
+    /// produced rather than a decode/re-encode of it.
+    func rpcRaw(_ function: String) async throws -> Data {
+        try await perform(
+            method: "POST",
+            url: config.restURL.appendingPathComponent("rpc/\(function)"),
+            body: SupabaseJSON.encoder.encode(EmptyBody()))
+    }
+
     // MARK: Edge Functions
 
     /// Invoke a Supabase Edge Function with no interesting return value, carrying the caller's
