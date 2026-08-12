@@ -84,7 +84,8 @@ struct FeedView: View {
                             avatarURL: container.avatarURL(for: post.post.avatarPath),
                             imageURL: container.profiles.postImageURL(for: post.post.imagePath),
                             onToggleCheers: { Task { await model.toggleCheers(post) } },
-                            onCommentCountChanged: { model.applyCommentCountDelta(postID: post.id, delta: $0) }
+                            onCommentCountChanged: { model.applyCommentCountDelta(postID: post.id, delta: $0) },
+                            onDeletePost: { Task { await model.deletePost(post) } }
                         )
                         .listRowInsets(EdgeInsets(top: Theme.Spacing.xs, leading: Theme.Spacing.md,
                                                    bottom: Theme.Spacing.xs, trailing: Theme.Spacing.md))
@@ -109,6 +110,14 @@ struct FeedView: View {
             Button("OK", role: .cancel) { model.cheersError = nil }
         } message: {
             Text(model.cheersError ?? "Please try again.")
+        }
+        .alert("Couldn't delete that post", isPresented: Binding(
+            get: { model.deleteError != nil },
+            set: { if !$0 { model.deleteError = nil } }
+        )) {
+            Button("OK", role: .cancel) { model.deleteError = nil }
+        } message: {
+            Text(model.deleteError ?? "Please try again.")
         }
     }
 

@@ -127,4 +127,66 @@ final class FeedViewModelTests: XCTestCase {
         XCTAssertEqual(model.posts.first?.commentCount, 45,
                        "a confirmed delete must subtract from the total (46 -> 45)")
     }
+
+    // MARK: - deletePost
+
+    /// The concrete regression this guards against: if `deletePost` forgot to remove the post from
+    /// `posts` after a successful `delete_post`, the deleted post would linger in the feed until
+    /// the next full refresh. Seeds two posts and deletes one, asserting the *other* one survives
+    /// untouched — not just that the list shrank, which a bug that removed the wrong post could
+    /// still pass.
+    func testSuccessfulDeletePostRemovesItFromTheListAndLeavesOthersUntouched() async throws {
+        let config = AppConfig(environment: .development,
+                               supabaseURL: URL(string: "https://unreachable.invalid")!,
+                               supabaseAnonKey: "k", universalHost: "unreachable.invalid")
+        let container = AppContainer(config: config)
+
+        func makePost(_ id: UUID, body: String) -> FeedPostDTO {
+            FeedPostDTO(postId: id, authorId: UUID(), displayName: "Barnaby", avatarPath: nil,
+                       body: body, imagePath: nil, placeLabel: nil, pubId: nil,
+                       createdAtRaw: "2026-08-12T12:00:00.000Z", cheersCount: 0,
+                       viewerHasCheered: false, commentCount: 0)
+        }
+        let toDelete = makePost(UUID(), body: "delete me")
+        let keep = makePost(UUID(), body: "keep me")
+        var deleteRequestedID: UUID?
+
+        let model = FeedViewModel(container: container, page: { _, _ in [toDelete, keep] },
+                                  deletePost: { id in deleteRequestedID = id })
+        await model.load()
+        XCTAssertEqual(model.posts.count, 2)
+
+        await model.deletePost(model.posts.first { $0.id == toDelete.postId }!)
+
+        XCTAssertEqual(deleteRequestedID, toDelete.postId, "delete_post must be called with the deleted post's id")
+        XCTAssertEqual(model.posts.map(\.id), [keep.postId],
+                       "only the deleted post must be removed; the other must survive untouched")
+        XCTAssertNil(model.deleteError)
+    }
+
+    /// The asymmetric half: a rejected delete (e.g. the server's rate limit) must leave `posts`
+    /// exactly as it was and must surface `deleteError` — a caller that removed the post from the
+    /// list unconditionally (success or failure) would make the post vanish from the UI even
+    /// though the server never actually deleted it.
+    func testFailedDeletePostLeavesTheListUnchangedAndSurfacesAnError() async throws {
+        let config = AppConfig(environment: .development,
+                               supabaseURL: URL(string: "https://unreachable.invalid")!,
+                               supabaseAnonKey: "k", universalHost: "unreachable.invalid")
+        let container = AppContainer(config: config)
+
+        let postID = UUID()
+        let seeded = FeedPostDTO(postId: postID, authorId: UUID(), displayName: "Barnaby",
+                                 avatarPath: nil, body: "stays put", imagePath: nil, placeLabel: nil,
+                                 pubId: nil, createdAtRaw: "2026-08-12T12:00:00.000Z", cheersCount: 0,
+                                 viewerHasCheered: false, commentCount: 0)
+
+        let model = FeedViewModel(container: container, page: { _, _ in [seeded] },
+                                  deletePost: { _ in throw SupabaseError.server(status: 429, message: "Too many requests") })
+        await model.load()
+
+        await model.deletePost(model.posts.first!)
+
+        XCTAssertEqual(model.posts.map(\.id), [postID], "a failed delete must not remove the post")
+        XCTAssertNotNil(model.deleteError, "a failed delete must surface an error")
+    }
 }

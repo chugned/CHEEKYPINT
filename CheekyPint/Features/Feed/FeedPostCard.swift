@@ -15,8 +15,22 @@ struct FeedPostCard: View {
     /// `FeedViewModel.applyCommentCountDelta(postID:delta:)` by whoever constructs this card, so
     /// it adjusts the authoritative count this card already has rather than replacing it.
     let onCommentCountChanged: (Int) -> Void
+    /// Called once the viewer has confirmed the `confirmationDialog` in `postMenu` below — by the
+    /// time this fires, the destructive action is already confirmed. Wired by whoever constructs
+    /// this card to `FeedViewModel.deletePost(_:)`, matching `onToggleCheers`'s shape.
+    let onDeletePost: () -> Void
+
+    @Environment(SessionController.self) private var session
 
     @State private var showingComments = false
+    @State private var showingReport = false
+    @State private var showingDeleteConfirmation = false
+
+    /// Same route `MyQRView` already uses for "the signed-in user's own id"
+    /// (`session.currentProfile?.id`) — not a new lookup invented for this card.
+    private var isOwnPost: Bool {
+        session.currentProfile?.id == post.post.authorId
+    }
 
     /// Built once and reused by every row — `RelativeDateTimeFormatter` is expensive to
     /// construct, so it must never be created inside `body`, which SwiftUI re-evaluates often.
@@ -64,6 +78,56 @@ struct FeedPostCard: View {
                 }
             }
             Spacer(minLength: 0)
+            postMenu
+        }
+    }
+
+    /// The overflow menu: Report is always offered; Delete is offered only for the viewer's own
+    /// posts, and is never the menu's default/prominent action — it sits second, behind Report,
+    /// and only takes effect after the `confirmationDialog` below is explicitly confirmed.
+    /// Deleting a post is destructive and irreversible from the user's side, so that dialog's
+    /// copy says so plainly rather than implying anything softer.
+    private var postMenu: some View {
+        Menu {
+            Button {
+                showingReport = true
+            } label: {
+                Label("Report", systemImage: "flag")
+            }
+            .accessibilityIdentifier("post-report-\(post.id)")
+            .accessibilityLabel("Report this post")
+
+            if isOwnPost {
+                Button(role: .destructive) {
+                    showingDeleteConfirmation = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .accessibilityIdentifier("post-delete-\(post.id)")
+                .accessibilityLabel("Delete this post")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .foregroundStyle(Theme.Palette.textSecondary)
+                .frame(minWidth: Theme.minTapTarget, minHeight: Theme.minTapTarget)
+                .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier("post-menu-\(post.id)")
+        .accessibilityLabel("Post options")
+        .confirmationDialog(
+            "Delete this post?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { onDeletePost() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            // Plain, unambiguous: this is the one piece of copy the brief requires — deleting a
+            // post cannot be undone from the user's side, and the dialog must say so outright.
+            Text("This can't be undone.")
+        }
+        .sheet(isPresented: $showingReport) {
+            ReportContentView(target: .post(id: post.id, hasPhoto: post.post.imagePath != nil))
         }
     }
 

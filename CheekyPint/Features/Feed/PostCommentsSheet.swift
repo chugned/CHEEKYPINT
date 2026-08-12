@@ -31,6 +31,10 @@ struct PostCommentsSheet: View {
     /// Every friend the user has picked from the autocomplete so far in this draft, keyed by
     /// their id. Read by `send()` via `MentionScanner.stillPresent` — see this type's doc.
     @State private var mentions: [UUID: String] = [:]
+    /// The comment currently being reported, if any — drives the `.sheet(item:)` below.
+    /// `PostCommentDTO` is already `Identifiable`, so this doubles as both "is a report sheet
+    /// showing" and "which comment it's for" with no extra Bool to keep in sync.
+    @State private var reportingComment: PostCommentDTO?
 
     var body: some View {
         NavigationStack {
@@ -67,6 +71,9 @@ struct PostCommentsSheet: View {
                         .accessibilityLabel("Close")
                 }
             }
+        }
+        .sheet(item: $reportingComment) { comment in
+            ReportContentView(target: .comment(id: comment.id))
         }
         .presentationDetents([.large])
         .task {
@@ -151,8 +158,13 @@ struct PostCommentsSheet: View {
                     .font(Theme.Typography.body)
                     .foregroundStyle(Theme.Palette.textPrimary)
             }
+            // Grouped separately from the row's trailing `commentMenu` below: `.combine` merges
+            // every child into one VoiceOver element, which would swallow the menu button's own
+            // tap action into the read-only text summary if it were included in this group.
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 0)
+            commentMenu(comment)
         }
-        .accessibilityElement(children: .combine)
         .swipeActions {
             if let currentUserID = model.currentUserID, comment.authorId == currentUserID {
                 Button(role: .destructive) {
@@ -164,6 +176,27 @@ struct PostCommentsSheet: View {
                 .accessibilityLabel("Delete comment")
             }
         }
+    }
+
+    /// The per-comment overflow menu — Report only. Swipe-to-delete for the viewer's own comments
+    /// already exists above; this must not add a second delete affordance.
+    private func commentMenu(_ comment: PostCommentDTO) -> some View {
+        Menu {
+            Button {
+                reportingComment = comment
+            } label: {
+                Label("Report", systemImage: "flag")
+            }
+            .accessibilityIdentifier("comment-report-\(comment.id)")
+            .accessibilityLabel("Report this comment")
+        } label: {
+            Image(systemName: "ellipsis")
+                .foregroundStyle(Theme.Palette.textSecondary)
+                .frame(minWidth: Theme.minTapTarget, minHeight: Theme.minTapTarget)
+                .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier("comment-menu-\(comment.id)")
+        .accessibilityLabel("Comment options")
     }
 
     /// Highlights every literal occurrence of `@<name>` in `Theme.Palette.forest`, but **only**

@@ -27,6 +27,7 @@
 		2F4CB2FBE90F249EE29E9366 /* DemoWorld.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FDC7B74515EEEC1AA3295CF /* DemoWorld.swift */; };
 		31F0B1D47E7AE7007002B2EB /* SupabaseError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 282061BC407687DE47C5B16A /* SupabaseError.swift */; };
 		322742751E501A3EF50F50D0 /* PubsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92B264CA1989F6776444F735 /* PubsView.swift */; };
+		3368B55AC99AE6EB55753290 /* ReportContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C417C695216C7E4003C958B2 /* ReportContentView.swift */; };
 		33CBB817E0DE3E6C7F0C00A5 /* PrivacySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D6AFC9DE60A85058380FA9B /* PrivacySettingsView.swift */; };
 		3698D7635FFEB1217ED4FC8F /* DemoComposeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8431B3781C6DDB129D65C967 /* DemoComposeTests.swift */; };
 		3B78F2CB38ABD72DD1B1CDF4 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAF0554527952664ACD8CB3 /* MainTabView.swift */; };
@@ -60,6 +61,7 @@
 		80D29C6B3EE43D5A636E5D13 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AA85C3CBCA4166E5CCFB23B /* ProfileView.swift */; };
 		8A273AD4FA7450ADF8F8DAAD /* ProfileRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A04B8A45B27EB5E594B5172 /* ProfileRepository.swift */; };
 		8B587A71D2A1C8BD5B106DED /* BlockedUsersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28E880C268F01EA897CD5EFD /* BlockedUsersView.swift */; };
+		8DAE93C1692BBD1C101E1255 /* ReportContentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EE6AEA2F988D4081AD90FA9 /* ReportContentTests.swift */; };
 		9093D3D6992A8521E0468EDE /* PubsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = A493EAA559F914C8DE9005DA /* PubsRepository.swift */; };
 		93223E29BE3078F11048419F /* RPCContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF84E8BCF22797D2F92B1FCD /* RPCContracts.swift */; };
 		93DA601A08AFD9F06E357FE5 /* DeleteAccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 992A7152E72932A1AD45B8E7 /* DeleteAccountView.swift */; };
@@ -166,6 +168,7 @@
 		83C8BCA3AB25054EBBC8DA22 /* SupabaseData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseData.swift; sourceTree = "<group>"; };
 		8431B3781C6DDB129D65C967 /* DemoComposeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoComposeTests.swift; sourceTree = "<group>"; };
 		8E8C8934C61E9AA06217C902 /* DiaryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryRepository.swift; sourceTree = "<group>"; };
+		8EE6AEA2F988D4081AD90FA9 /* ReportContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportContentTests.swift; sourceTree = "<group>"; };
 		8F7E533FFB68AE0D607CE84E /* PostCommentsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostCommentsViewModelTests.swift; sourceTree = "<group>"; };
 		91BD3AF0DFABFB5854C87176 /* Production.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Production.xcconfig; sourceTree = "<group>"; };
 		92B264CA1989F6776444F735 /* PubsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PubsView.swift; sourceTree = "<group>"; };
@@ -192,6 +195,7 @@
 		BF16E8A74CEE2149C589D7CF /* SessionsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsRepository.swift; sourceTree = "<group>"; };
 		BFDD087F4855721B840E53DE /* IdempotencyKeyRetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdempotencyKeyRetryTests.swift; sourceTree = "<group>"; };
 		C0CCF8937EF44EB8232679D5 /* RemoteImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteImage.swift; sourceTree = "<group>"; };
+		C417C695216C7E4003C958B2 /* ReportContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportContentView.swift; sourceTree = "<group>"; };
 		C77AFE875ADF240F7229377C /* FriendProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendProfileView.swift; sourceTree = "<group>"; };
 		CBA751D685867DE7C001198D /* PostCommentsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostCommentsSheet.swift; sourceTree = "<group>"; };
 		CE35C031D8F5446061595412 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
@@ -428,6 +432,7 @@
 		908E2FE93A7849171C6C7743 /* Moderation */ = {
 			isa = PBXGroup;
 			children = (
+				C417C695216C7E4003C958B2 /* ReportContentView.swift */,
 				FE5D8680C57253489F8ED93F /* ReportUserView.swift */,
 			);
 			path = Moderation;
@@ -538,6 +543,7 @@
 				E0BA5446A6E4A869C6306A94 /* PlacePickerTests.swift */,
 				FB8CDFDA9CF178CBFD8B078D /* PostCommentsSheetTests.swift */,
 				8F7E533FFB68AE0D607CE84E /* PostCommentsViewModelTests.swift */,
+				8EE6AEA2F988D4081AD90FA9 /* ReportContentTests.swift */,
 			);
 			path = CheekyPintTests;
 			sourceTree = "<group>";
@@ -740,6 +746,7 @@
 				688B46723CE439F5EEE38758 /* PlacePickerTests.swift in Sources */,
 				A43356911DE15515290CCC1E /* PostCommentsSheetTests.swift in Sources */,
 				A50ABB43266BF70A73F1CD61 /* PostCommentsViewModelTests.swift in Sources */,
+				8DAE93C1692BBD1C101E1255 /* ReportContentTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -807,6 +814,7 @@
 				93223E29BE3078F11048419F /* RPCContracts.swift in Sources */,
 				A25BAC1DA5559DEAB54D535F /* RemoteAvatar.swift in Sources */,
 				E17B20249725231CDA7FA574 /* RemoteImage.swift in Sources */,
+				3368B55AC99AE6EB55753290 /* ReportContentView.swift in Sources */,
 				AAD1081504F7466674B9481D /* ReportUserView.swift in Sources */,
 				4514F01F901E0578E765433B /* RootView.swift in Sources */,
 				5FA9B27853B3A2B1A9923C87 /* SessionController.swift in Sources */,

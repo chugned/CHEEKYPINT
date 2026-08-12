@@ -46,6 +46,10 @@ final class FeedViewModel {
     /// the same pattern `LeaderboardView` uses for a failed Nudge.
     var cheersError: String?
 
+    /// Mirrors `cheersError`'s reasoning for a failed post deletion — a transient alert, not a
+    /// full-screen error, since the rest of the feed is still perfectly valid.
+    var deleteError: String?
+
     private let pageSize: Int
 
     /// The one seam this view model needs for testing Cheers: how a Cheers tap is sent. Defaults
@@ -61,6 +65,9 @@ final class FeedViewModel {
     /// `20260811000500_rpc_feed_posts.sql`) doesn't duplicate it client-side.
     private let pageRequest: (FeedCursor?, Int) async throws -> [FeedPostDTO]
 
+    /// The seam for testing post deletion, mirroring `toggleCheersRequest`/`pageRequest` above.
+    private let deletePostRequest: (UUID) async throws -> Void
+
     /// Posts with a Cheers toggle currently in flight. Each tap used to spawn an independent,
     /// unguarded `Task`, so two rapid taps on the same post raced two requests over one HTTP/2
     /// connection with no ordering guarantee — if the second request (say, the "un-cheer") landed
@@ -75,13 +82,19 @@ final class FeedViewModel {
     /// preserve by queuing or coalescing it.
     private var cheersInFlight: Set<UUID> = []
 
+    /// Posts currently being deleted, so a second invocation while one is already in flight is
+    /// ignored rather than firing a duplicate `delete_post` — same reasoning as `cheersInFlight`.
+    private var deletingPostIDs: Set<UUID> = []
+
     init(container: AppContainer, pageSize: Int = 20,
          toggleCheers: ((UUID) async throws -> ToggleCheersDTO)? = nil,
-         page: ((FeedCursor?, Int) async throws -> [FeedPostDTO])? = nil) {
+         page: ((FeedCursor?, Int) async throws -> [FeedPostDTO])? = nil,
+         deletePost: ((UUID) async throws -> Void)? = nil) {
         self.container = container
         self.pageSize = pageSize
         self.toggleCheersRequest = toggleCheers ?? { try await container.feed.toggleCheers(postID: $0) }
         self.pageRequest = page ?? { cursor, limit in try await container.feed.page(before: cursor, limit: limit) }
+        self.deletePostRequest = deletePost ?? { try await container.feed.deletePost($0) }
     }
 
     /// First load. Clears any existing posts up front so a retry after an error doesn't show
@@ -223,6 +236,26 @@ final class FeedViewModel {
     func applyCommentCountDelta(postID: UUID, delta: Int) {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return }
         posts[index].commentCount = max(0, posts[index].commentCount + delta)
+    }
+
+    /// Deletes a post the viewer owns. Destructive and irreversible from the user's side — the
+    /// confirmation itself lives in `FeedPostCard`'s `confirmationDialog`, not here; by the time
+    /// this is called the user has already confirmed. On success the post is removed from `posts`
+    /// locally rather than waiting for the next full refresh, the same "adjust local state once
+    /// the server has confirmed" shape as `applyCommentCountDelta`. A no-op if the post has
+    /// already scrolled out of `posts` or a delete for it is already outstanding.
+    func deletePost(_ post: FeedPostState) async {
+        guard !deletingPostIDs.contains(post.id) else { return }
+        deletingPostIDs.insert(post.id)
+        defer { deletingPostIDs.remove(post.id) }
+        do {
+            try await deletePostRequest(post.id)
+            posts.removeAll { $0.id == post.id }
+        } catch let error as SupabaseError {
+            deleteError = error.friendlyMessage
+        } catch {
+            deleteError = "Couldn't delete that post. Please try again."
+        }
     }
 }
 
