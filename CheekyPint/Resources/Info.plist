@@ -43,9 +43,11 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 
-	<!-- Profile photos are the only remaining permission-backed feature. -->
+	<!-- Photo library: profile picture and post photos. Location: "Search near me" in the pub picker. -->
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>CheekyPint lets you choose a profile picture from your photo library.</string>
+	<string>CheekyPint lets you choose a profile picture and add photos to your posts.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>CheekyPint can find pubs near you when you tap “Search near me”. You can always search by name instead.</string>
 
 	<!-- Custom scheme retained for authentication callbacks only. -->
 	<key>CFBundleURLTypes</key>

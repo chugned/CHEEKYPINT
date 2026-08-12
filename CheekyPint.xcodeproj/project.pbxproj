@@ -25,6 +25,7 @@
 		31F0B1D47E7AE7007002B2EB /* SupabaseError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 282061BC407687DE47C5B16A /* SupabaseError.swift */; };
 		322742751E501A3EF50F50D0 /* PubsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92B264CA1989F6776444F735 /* PubsView.swift */; };
 		33CBB817E0DE3E6C7F0C00A5 /* PrivacySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D6AFC9DE60A85058380FA9B /* PrivacySettingsView.swift */; };
+		3698D7635FFEB1217ED4FC8F /* DemoComposeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8431B3781C6DDB129D65C967 /* DemoComposeTests.swift */; };
 		3B78F2CB38ABD72DD1B1CDF4 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAF0554527952664ACD8CB3 /* MainTabView.swift */; };
 		3D794374FD18A3D493F6A463 /* CheekyPintApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 730EF203CA9747BBEC5A88DA /* CheekyPintApp.swift */; };
 		4279C0921BBA29012FF0FD3D /* SessionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B48F584588441F21774A0336 /* SessionViews.swift */; };
@@ -153,6 +154,7 @@
 		7DC941C300523CECA2080CDC /* QRCodeGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeGenerator.swift; sourceTree = "<group>"; };
 		7E9956064AA1C857C4FBDA79 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		83C8BCA3AB25054EBBC8DA22 /* SupabaseData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseData.swift; sourceTree = "<group>"; };
+		8431B3781C6DDB129D65C967 /* DemoComposeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoComposeTests.swift; sourceTree = "<group>"; };
 		8E8C8934C61E9AA06217C902 /* DiaryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryRepository.swift; sourceTree = "<group>"; };
 		91BD3AF0DFABFB5854C87176 /* Production.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Production.xcconfig; sourceTree = "<group>"; };
 		92B264CA1989F6776444F735 /* PubsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PubsView.swift; sourceTree = "<group>"; };
@@ -508,6 +510,7 @@
 				0B485E248E225AAA60C16019 /* AppSmokeTests.swift */,
 				0A25E072993F0DF9B435AF74 /* BeerCatalogTests.swift */,
 				3790C1282D2C4B39809DB396 /* DeleteAccountWiringTests.swift */,
+				8431B3781C6DDB129D65C967 /* DemoComposeTests.swift */,
 				1872FAFB6961D5A9CADF105A /* FeedPagingTests.swift */,
 				4C49867E1056C19580C9661C /* FeedRepositoryTests.swift */,
 				2E5EFD7C3D050A64AB9145D7 /* FeedViewModelTests.swift */,
@@ -701,6 +704,7 @@
 				F4EDDCADA7B3D1DAE9F8FB5E /* AppSmokeTests.swift in Sources */,
 				2EBA417F30678B235EC70817 /* BeerCatalogTests.swift in Sources */,
 				AC2CCC69E150D6A237283A4A /* DeleteAccountWiringTests.swift in Sources */,
+				3698D7635FFEB1217ED4FC8F /* DemoComposeTests.swift in Sources */,
 				EF477088B5EF2B3E9E798050 /* FeedPagingTests.swift in Sources */,
 				F74A4CE5753D52298F021FA9 /* FeedRepositoryTests.swift in Sources */,
 				E78FAFD4C9EF851833EA669B /* FeedViewModelTests.swift in Sources */,

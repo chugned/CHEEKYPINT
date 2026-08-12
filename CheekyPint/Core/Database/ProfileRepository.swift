@@ -142,10 +142,27 @@ struct ProfileRepository: Sendable {
         guard let path else { return nil }
         if path.hasPrefix(Self.localPostImagePrefix) {
             let filename = String(path.dropFirst(Self.localPostImagePrefix.count))
-            return Bundle.main.url(forResource: (filename as NSString).deletingPathExtension,
-                                   withExtension: (filename as NSString).pathExtension)
+            // A photo composed in demo mode was written to Application Support; the seeded post's
+            // photo ships in the bundle. Try the written file first, because a bundle lookup for a
+            // just-picked photo can never succeed.
+            let written = Self.localPostImageDirectory().appending(path: filename)
+            if FileManager.default.fileExists(atPath: written.path) { return written }
+            let name = (filename as NSString).deletingPathExtension
+            let ext = (filename as NSString).pathExtension
+            return Bundle.main.url(forResource: name, withExtension: ext)
         }
         return data.objectURL(bucket: "post-images", path: path)
+    }
+
+    /// Write a composed post's JPEG into Application Support so `postImageURL` can resolve it —
+    /// mirrors `writeLocalAvatar` below exactly, but into its own directory. A photo picked in
+    /// demo mode is never a bundle asset, so `Bundle.main.url(forResource:)` can never find it.
+    func writeLocalPostImage(_ jpeg: Data) throws -> String {
+        let filename = "\(UUID().uuidString).jpg"
+        let directory = Self.localPostImageDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try jpeg.write(to: directory.appendingPathComponent(filename), options: [.atomic])
+        return Self.localPostImagePrefix + filename
     }
 
     private static let localAvatarPrefix = "local-avatar/"
@@ -162,5 +179,10 @@ struct ProfileRepository: Sendable {
     private static func localAvatarDirectory() -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CheekyPintAvatars", isDirectory: true)
+    }
+
+    private static func localPostImageDirectory() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CheekyPintPostImages", isDirectory: true)
     }
 }

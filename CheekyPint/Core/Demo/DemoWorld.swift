@@ -399,10 +399,10 @@ actor DemoWorld {
         return ToggleCheersDTO(cheered: feedPosts[index].viewerHasCheered, cheersCount: feedPosts[index].cheersCount)
     }
 
-    func createPost(body: String?, imagePath: String?, placeLabel: String?) -> UUID {
+    func createPost(body: String?, imagePath: String?, placeLabel: String?, pubID: UUID?) -> UUID {
         let createdAt = Date()
         let newPost = DemoPost(id: UUID(), authorID: Self.aliceID, body: body, imagePath: imagePath,
-                               placeLabel: placeLabel, pubID: nil, createdAt: createdAt,
+                               placeLabel: placeLabel, pubID: pubID, createdAt: createdAt,
                                createdAtRaw: Self.feedTimestampStyle.format(createdAt),
                                cheersCount: 0, viewerHasCheered: false, deletedAt: nil)
         feedPosts.insert(newPost, at: 0)

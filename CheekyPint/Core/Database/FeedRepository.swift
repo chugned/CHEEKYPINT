@@ -30,7 +30,8 @@ struct FeedRepository: Sendable {
     @discardableResult
     func createPost(body: String?, imagePath: String?, placeLabel: String?, pubID: UUID?) async throws -> UUID {
         if await DemoWorld.shared.isActive {
-            return await DemoWorld.shared.createPost(body: body, imagePath: imagePath, placeLabel: placeLabel)
+            return await DemoWorld.shared.createPost(body: body, imagePath: imagePath,
+                                                      placeLabel: placeLabel, pubID: pubID)
         }
         let created: CreatedPostDTO = try await data.rpc("create_post", params: CreatePostParams(
             pBody: body, pImagePath: imagePath, pPlaceLabel: placeLabel, pPubId: pubID))
