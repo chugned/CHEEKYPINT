@@ -76,6 +76,24 @@ public struct ProfileTextSanitizer: Sendable {
         clean(raw, allowNewlines: allowNewlines, maxLength: .max).unicodeScalars.count
     }
 
+    /// Whether `raw` will be stored **whole** in a field bounded to `maxLength` code points — the
+    /// gate a caller must pass before saving `sanitize(raw, …, maxLength:)`, because sanitising
+    /// *truncates* and truncation is silent.
+    ///
+    /// The three profile fields' limits are constants on this type (they mirror `profiles`' CHECK
+    /// constraints, and profile writes are a plain PostgREST `PATCH` with no server-side clamp), so
+    /// their gate belongs here too. The feed composers spell the same comparison out at their own
+    /// call sites, because their limits mirror `create_post`/`add_comment` clamps that live with the
+    /// caller rather than here — see `sanitize(_:allowNewlines:maxLength:)`.
+    ///
+    /// Necessary as well as sufficient: `false` does **not** only mean "a tail would be trimmed". A
+    /// single grapheme cluster can be arbitrarily many code points, so when the first cluster alone
+    /// overflows the budget, `sanitize` correctly yields `""` — saving that would replace what the
+    /// user typed with nothing at all. See the truncation loop in `clean`.
+    public func fits(_ raw: String, allowNewlines: Bool, maxLength: Int) -> Bool {
+        sanitizedLength(raw, allowNewlines: allowNewlines) <= maxLength
+    }
+
     // MARK: - Core
 
     private func clean(_ raw: String, allowNewlines: Bool, maxLength: Int) -> String {
@@ -125,10 +143,20 @@ public struct ProfileTextSanitizer: Sendable {
             // A cluster that doesn't fit ends the loop rather than being partially emitted. The
             // degenerate case — a single cluster wider than the whole budget — therefore yields
             // "", which is correct rather than convenient: emitting a partial cluster would break
-            // the code-point guarantee this function exists to provide. No caller can reach it:
-            // the smallest limit in the app is 40 (display name) and the widest cluster that
-            // survives step 1 is a handful of scalars (joiners, the widest offenders, are stripped
-            // there), so `width > maxLength` needs a limit in the single digits.
+            // the code-point guarantee this function exists to provide.
+            //
+            // That case IS reachable, on any limit. Nonspacing marks (category Mn) are neither
+            // control nor format nor whitespace, so step 1 keeps every one of them, and a grapheme
+            // cluster can hold unboundedly many: "a" followed by U+0300…U+0332 four times over is
+            // one cluster of 205 scalars, so `sanitizeBio` (limit 160) returns "" and
+            // `sanitizeDisplayName` (limit 40) needs only 41.
+            //
+            // Which is why truncating is never a caller's *last* line of defence for text a user
+            // typed. Callers that write user input must gate on
+            // `sanitizedLength(_:allowNewlines:) <= limit` first and tell the user when it fails —
+            // the two composers, both report screens and both profile screens all do — so this
+            // branch only ever runs behind a check the user has already been shown. Saving the
+            // result of an ungated call would turn "your text is too long" into an empty column.
             guard scalarsUsed + width <= maxLength else { break }
             truncated.append(character)
             scalarsUsed += width

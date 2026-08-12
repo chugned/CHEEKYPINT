@@ -20,7 +20,7 @@ struct EditProfileView: View {
     @State private var errorMessage: String?
 
     private let validator = UsernameValidator()
-    private let sanitizer = ProfileTextSanitizer()
+    private static let sanitizer = ProfileTextSanitizer()
 
     var body: some View {
         Form {
@@ -39,6 +39,11 @@ struct EditProfileView: View {
             Section("Nickname") {
                 TextField("Nickname", text: $displayName)
                     .textInputAutocapitalization(.words)
+                    .accessibilityIdentifier("edit-profile-display-name")
+                    .accessibilityLabel("Nickname")
+                tooLongMessage(displayName, allowNewlines: false,
+                               limit: ProfileTextSanitizer.displayNameMaxLength,
+                               identifier: "edit-profile-display-name-error")
                 Text("This is the name your mates see around CheekyPint.")
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Palette.textSecondary)
@@ -47,19 +52,35 @@ struct EditProfileView: View {
                 TextField("username", text: $username)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .onChange(of: username) { _, value in validateUsername(value) }
-                if let usernameError { Text(usernameError).font(Theme.Typography.caption).foregroundStyle(Theme.Palette.warning) }
+                    .accessibilityIdentifier("edit-profile-username")
+                    .accessibilityLabel("Username")
+                if let usernameError {
+                    Text(usernameError).font(Theme.Typography.caption).foregroundStyle(Theme.Palette.warning)
+                        .accessibilityIdentifier("edit-profile-username-error")
+                }
             }
             Section("About") {
                 TextField("Short bio", text: $bio, axis: .vertical).lineLimit(2...4)
+                    .accessibilityIdentifier("edit-profile-bio")
+                    .accessibilityLabel("Short bio")
+                tooLongMessage(bio, allowNewlines: true, limit: ProfileTextSanitizer.bioMaxLength,
+                               identifier: "edit-profile-bio-error")
             }
             Section {
                 TextField("e.g. Graz, Austria", text: $city)
+                    .accessibilityIdentifier("edit-profile-city")
+                    .accessibilityLabel("Broad location")
+                tooLongMessage(city, allowNewlines: false, limit: ProfileTextSanitizer.cityMaxLength,
+                               identifier: "edit-profile-city-error")
             } header: {
                 Text("Broad location")
             } footer: {
                 Text("A broad area only — never your address. Off to friends by default.")
             }
-            if let errorMessage { Text(errorMessage).foregroundStyle(Theme.Palette.warning) }
+            if let errorMessage {
+                Text(errorMessage).foregroundStyle(Theme.Palette.warning)
+                    .accessibilityIdentifier("edit-profile-error")
+            }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.Palette.backgroundPrimary)
@@ -68,10 +89,58 @@ struct EditProfileView: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { Task { await save() } }
-                    .disabled(isSaving || usernameError != nil || sanitizer.sanitizeDisplayName(displayName).isEmpty)
+                    .disabled(isSaving || usernameError != nil || hasOverLongField
+                              || Self.sanitizer.sanitizeDisplayName(displayName).isEmpty)
+                    .accessibilityIdentifier("edit-profile-save")
+                    .accessibilityLabel("Save profile")
             }
         }
         .onAppear(perform: populate)
+    }
+
+    // MARK: - Length gates
+    //
+    // The three free-text fields are saved through `ProfileTextSanitizer`, which truncates to a
+    // *code-point* budget at grapheme-cluster boundaries. Truncating silently is the problem: the
+    // `profiles` CHECK constraints are the only server-side bound (profile writes are a plain
+    // PostgREST PATCH with no clamp), so whatever the client trims never reaches the server to be
+    // complained about, and one grapheme cluster can be arbitrarily many code points — "a" plus a
+    // long run of combining marks is a single visible character that blows a 160-code-point bio
+    // budget, and truncation then yields "", i.e. a saved-empty bio the user never asked for.
+    //
+    // So the fields gate on the sanitised length before saving, exactly as the two feed composers
+    // and the report sheet do, and say so on screen. The user's text is either saved whole or
+    // refused with a reason; it is never quietly shortened or emptied.
+
+    /// `static` (like `ComposePostSheet.canSubmit`) so "a 205-code-point bio blocks Save" is
+    /// testable without a view instance — the whole point being that this input previously sailed
+    /// through Save and stored `""`.
+    static func hasOverLongField(displayName: String, bio: String, city: String) -> Bool {
+        !sanitizer.fits(displayName, allowNewlines: false,
+                        maxLength: ProfileTextSanitizer.displayNameMaxLength)
+            || !sanitizer.fits(bio, allowNewlines: true, maxLength: ProfileTextSanitizer.bioMaxLength)
+            || !sanitizer.fits(city, allowNewlines: false, maxLength: ProfileTextSanitizer.cityMaxLength)
+    }
+
+    private var hasOverLongField: Bool {
+        Self.hasOverLongField(displayName: displayName, bio: bio, city: city)
+    }
+
+    /// Shown only when the field is actually over its limit. The count is spelled out because it can
+    /// disagree wildly with what the field looks like — 41 code points can be one visible character
+    /// — and "too long" with no number would be baffling in exactly that case.
+    @ViewBuilder
+    private func tooLongMessage(_ raw: String, allowNewlines: Bool, limit: Int, identifier: String) -> some View {
+        // The same `fits` predicate the Save gate uses, so a field can never be refused without
+        // saying so, or flagged without being refused.
+        if !Self.sanitizer.fits(raw, allowNewlines: allowNewlines, maxLength: limit) {
+            let length = Self.sanitizer.sanitizedLength(raw, allowNewlines: allowNewlines)
+            Text(verbatim: "Too long: \(length)/\(limit). Accents and emoji can count as more than one character.")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Palette.warning)
+                .accessibilityIdentifier(identifier)
+                .accessibilityLabel("Too long: \(length) of \(limit) characters")
+        }
     }
 
     @ViewBuilder
@@ -131,12 +200,16 @@ struct EditProfileView: View {
     }
 
     private func save() async {
+        // `.disabled` alone is the weaker guard — a second tap can be dispatched from its own `Task`
+        // before the first re-render — and here it would also decide whether text gets truncated,
+        // so the length gate is re-checked in the action rather than trusted to the button state.
+        guard !isSaving, !hasOverLongField else { return }
         isSaving = true; errorMessage = nil
         defer { isSaving = false }
         var update = ProfileUpdate(
-            displayName: sanitizer.sanitizeDisplayName(displayName),
-            bio: sanitizer.sanitizeBio(bio),
-            city: sanitizer.sanitizeCity(city)
+            displayName: Self.sanitizer.sanitizeDisplayName(displayName),
+            bio: Self.sanitizer.sanitizeBio(bio),
+            city: Self.sanitizer.sanitizeCity(city)
         )
         if !username.isEmpty, case let .success(normalised) = validator.validate(username) {
             update.username = normalised

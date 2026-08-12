@@ -185,6 +185,25 @@ section("Validation & sanitising") {
     // points, so the budget must be in those or the CHECK constraint rejects the write outright.
     let nfd = sanitizer.sanitizeDisplayName(String(repeating: "o\u{0308}", count: 40))
     expectEqual(nfd.unicodeScalars.count, 40, "display name is budgeted in code points, as char_length counts")
+
+    // One grapheme cluster can be wider than the whole budget: nonspacing marks (category Mn) all
+    // survive cleaning, so "a" + U+0300…U+0332 × 4 is a single visible character of 205 code points.
+    // Sanitising it yields "" — a caller that saved that blind would replace a bio the user typed
+    // with an empty column, so `fits` has to reject it before the truncation ever runs.
+    let marks = String((0x0300...0x0332).map { Character(UnicodeScalar($0)!) })
+    let oneWideCluster = "a" + String(repeating: marks, count: 4)
+    expectEqual(oneWideCluster.count, 1, "fixture: the marks form a single grapheme cluster")
+    expectEqual(oneWideCluster.unicodeScalars.count, 205, "fixture: 205 code points in that one cluster")
+    expectEqual(sanitizer.sanitizeBio(oneWideCluster), "", "a cluster wider than the budget truncates to nothing")
+    expect(!sanitizer.fits(oneWideCluster, allowNewlines: true, maxLength: 160),
+           "fits rejects the oversized cluster instead of letting the caller save \"\"")
+    // 160 is a literal for the same reason 40 is above: it mirrors profiles.bio's CHECK.
+    expect(sanitizer.fits(String(repeating: "z", count: 160), allowNewlines: true, maxLength: 160),
+           "exactly 160 code points fits")
+    expect(!sanitizer.fits(String(repeating: "z", count: 161), allowNewlines: true, maxLength: 160),
+           "161 code points does not fit")
+    expect(!sanitizer.fits(String(repeating: "a\u{0308}", count: 81), allowNewlines: true, maxLength: 160),
+           "162 code points does not fit even as only 81 characters")
 }
 
 section("QR tokens & deep links") {

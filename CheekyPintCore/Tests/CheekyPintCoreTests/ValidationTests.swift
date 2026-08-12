@@ -183,4 +183,70 @@ final class ProfileTextSanitizerTests: XCTestCase {
         XCTAssertEqual(sanitizer.sanitizedLength("  a     b  ", allowNewlines: false), 3,
                        "stored as \"a b\" — 3 code points, not the 11 typed")
     }
+
+    // MARK: - The one-cluster-wider-than-the-budget case, and the gate that must catch it
+
+    /// A single grapheme cluster built from nonspacing marks, wider than the whole bio budget.
+    /// `"a"` plus U+0300…U+0332 four times over: 205 code points, one user-visible character.
+    ///
+    /// Marks are category Mn — neither control, format nor whitespace — so step 1 keeps every one of
+    /// them, and the truncation loop then cannot emit even the first cluster. `sanitizeBio` therefore
+    /// returns `""`: correct (a partial cluster would break the code-point guarantee) but lethal if a
+    /// caller saves it blind, which is exactly what `EditProfileView` did — a non-empty bio silently
+    /// became an empty column, where before the code-point budget the same input reached the server
+    /// and was refused by `char_length(bio) <= 160` with an error the user could see.
+    func testABioOfOneOversizedClusterSanitizesToEmptyAndMustFailTheFitsGate() {
+        let marks = String((0x0300...0x0332).map { Character(UnicodeScalar($0)!) })
+        let input = "a" + String(repeating: marks, count: 4)
+
+        XCTAssertEqual(input.count, 1, "fixture: the marks must combine into a single grapheme cluster")
+        XCTAssertEqual(input.unicodeScalars.count, 205, "fixture: 1 + 51 × 4 code points")
+
+        XCTAssertEqual(sanitizer.sanitizeBio(input), "",
+                       "the only cluster is wider than the 160-code-point budget, so nothing can be emitted")
+        XCTAssertEqual(sanitizer.sanitizedLength(input, allowNewlines: true), 205,
+                       "no mark is stripped — the gate has to see all 205")
+        XCTAssertFalse(sanitizer.fits(input, allowNewlines: true, maxLength: ProfileTextSanitizer.bioMaxLength),
+                       "fits must reject it, or the caller saves \"\" over what the user typed")
+    }
+
+    /// The display-name half of the same shape, at the smaller limit: 52 code points in one cluster.
+    /// This is the input that greyed out Save/Next — `sanitizeDisplayName(…).isEmpty` — while the
+    /// field visibly contained a character and nothing on screen said why.
+    func testADisplayNameOfOneOversizedClusterSanitizesToEmptyAndMustFailTheFitsGate() {
+        let marks = (0x0300...0x0332).map { Character(UnicodeScalar($0)!) }
+        let input = "a" + String(marks.prefix(51))
+
+        XCTAssertEqual(input.count, 1, "fixture: one grapheme cluster")
+        XCTAssertEqual(input.unicodeScalars.count, 52, "fixture: 52 code points against a limit of 40")
+
+        XCTAssertEqual(sanitizer.sanitizeDisplayName(input), "")
+        XCTAssertFalse(
+            sanitizer.fits(input, allowNewlines: false, maxLength: ProfileTextSanitizer.displayNameMaxLength),
+            "fits must reject it so the screen can say why Save is unavailable")
+    }
+
+    /// `fits` must be exactly the boundary `sanitize` truncates at, in code points — flipped by one
+    /// code point in both units. Without the 161st/162nd cases a `>=` or a grapheme-based comparison
+    /// would pass.
+    func testFitsFlipsAtExactlyTheCodePointLimit() {
+        let atLimit = String(repeating: "z", count: 160)
+        XCTAssertTrue(sanitizer.fits(atLimit, allowNewlines: true, maxLength: ProfileTextSanitizer.bioMaxLength),
+                      "exactly 160 code points must fit")
+        XCTAssertEqual(sanitizer.sanitizeBio(atLimit), atLimit, "and must survive sanitising untouched")
+
+        XCTAssertFalse(sanitizer.fits(atLimit + "z", allowNewlines: true,
+                                      maxLength: ProfileTextSanitizer.bioMaxLength),
+                       "161 must not fit")
+
+        // 81 NFD characters is 162 code points but only 81 clusters: a grapheme-based `fits` would
+        // wave this through and then let `sanitizeBio` drop the last character silently.
+        let nfd = String(repeating: "a\u{0308}", count: 81)
+        XCTAssertEqual(nfd.count, 81)
+        XCTAssertFalse(sanitizer.fits(nfd, allowNewlines: true, maxLength: ProfileTextSanitizer.bioMaxLength),
+                       "162 code points must not fit, even though it is only 81 characters")
+        XCTAssertTrue(sanitizer.fits(String(repeating: "a\u{0308}", count: 80), allowNewlines: true,
+                                     maxLength: ProfileTextSanitizer.bioMaxLength),
+                      "160 code points as 80 NFD characters must fit")
+    }
 }

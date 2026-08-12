@@ -20,7 +20,7 @@ struct ProfileSetupFlowView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
 
-    private let sanitizer = ProfileTextSanitizer()
+    private static let sanitizer = ProfileTextSanitizer()
 
     var body: some View {
         NavigationStack {
@@ -46,9 +46,16 @@ struct ProfileSetupFlowView: View {
         switch step {
         case .name:
             field(title: "What should mates call you?", systemImage: "person.fill") {
-                TextField("Display name", text: $displayName)
-                    .textInputAutocapitalization(.words)
-                    .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    TextField("Display name", text: $displayName)
+                        .textInputAutocapitalization(.words)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("profile-setup-display-name")
+                        .accessibilityLabel("Display name")
+                    tooLongMessage(displayName, allowNewlines: false,
+                                   limit: ProfileTextSanitizer.displayNameMaxLength,
+                                   identifier: "profile-setup-display-name-error")
+                }
             }
         case .photo:
             VStack(spacing: Theme.Spacing.md) {
@@ -64,6 +71,11 @@ struct ProfileSetupFlowView: View {
                     TextField("e.g. Graz, Austria", text: $city)
                         .textInputAutocapitalization(.words)
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("profile-setup-city")
+                        .accessibilityLabel("Broad location")
+                    tooLongMessage(city, allowNewlines: false,
+                                   limit: ProfileTextSanitizer.cityMaxLength,
+                                   identifier: "profile-setup-city-error")
                     Text("A broad area only — never your address. Off to friends by default.")
                         .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.Palette.textSecondary)
@@ -79,15 +91,60 @@ struct ProfileSetupFlowView: View {
             if step != .name {
                 Button("Back") { withAnimation { step = Step(rawValue: step.rawValue - 1) ?? .name } }
                     .buttonStyle(SecondaryButtonStyle())
+                    .accessibilityIdentifier("profile-setup-back")
+                    .accessibilityLabel("Back")
             }
             Button(step == .privacy ? "Start pouring" : "Next") {
                 if step == .privacy { Task { await commit() } }
                 else { withAnimation { step = Step(rawValue: step.rawValue + 1) ?? .privacy } }
             }
             .buttonStyle(PintButtonStyle())
-            .disabled(step == .name && sanitizer.sanitizeDisplayName(displayName).isEmpty)
+            .disabled(hasOverLongField
+                      || (step == .name && Self.sanitizer.sanitizeDisplayName(displayName).isEmpty))
+            .accessibilityIdentifier("profile-setup-next")
+            .accessibilityLabel(step == .privacy ? "Start pouring" : "Next")
         }
         .overlay { if isSaving { ProgressView().tint(Theme.Palette.accent) } }
+    }
+
+    // MARK: - Length gates
+    //
+    // Both fields are saved through `ProfileTextSanitizer`, which truncates to a *code-point* budget
+    // — and one grapheme cluster can be arbitrarily many code points, so a single visible character
+    // built from combining marks can exceed the 40-code-point name budget and truncate to "". That
+    // used to grey out Next with nothing on screen to explain why, while the field plainly contained
+    // text. Gating on the sanitised length instead (as the feed composers and the report sheet do)
+    // means the same input still blocks Next, but now says what is wrong.
+    //
+    // `hasOverLongField` covers both fields on every step rather than only the visible one: the last
+    // step writes both, so "Start pouring" must not be reachable with either over its limit.
+
+    /// `static` so "a 52-code-point display name blocks Next" is testable without a view instance.
+    /// Gates on `ProfileTextSanitizer.fits`, the same predicate `EditProfileView` uses for the same
+    /// two columns — two screens writing one column through two hand-rolled comparisons is how the
+    /// user-report path drifted from the content ones.
+    static func hasOverLongField(displayName: String, city: String) -> Bool {
+        !sanitizer.fits(displayName, allowNewlines: false,
+                        maxLength: ProfileTextSanitizer.displayNameMaxLength)
+            || !sanitizer.fits(city, allowNewlines: false, maxLength: ProfileTextSanitizer.cityMaxLength)
+    }
+
+    private var hasOverLongField: Bool {
+        Self.hasOverLongField(displayName: displayName, city: city)
+    }
+
+    /// Shown only when the field is over its limit. The count is spelled out because it can disagree
+    /// wildly with what the field looks like — 41 code points can be one visible character.
+    @ViewBuilder
+    private func tooLongMessage(_ raw: String, allowNewlines: Bool, limit: Int, identifier: String) -> some View {
+        if !Self.sanitizer.fits(raw, allowNewlines: allowNewlines, maxLength: limit) {
+            let length = Self.sanitizer.sanitizedLength(raw, allowNewlines: allowNewlines)
+            Text(verbatim: "Too long: \(length)/\(limit). Accents and emoji can count as more than one character.")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Palette.warning)
+                .accessibilityIdentifier(identifier)
+                .accessibilityLabel("Too long: \(length) of \(limit) characters")
+        }
     }
 
     // MARK: Helpers
@@ -114,13 +171,16 @@ struct ProfileSetupFlowView: View {
     }
 
     private func commit() async {
+        // Re-checked in the action, not left to `.disabled`: a second tap can be dispatched from its
+        // own `Task` before the first re-render, and here the gate decides whether text is truncated.
+        guard !isSaving, !hasOverLongField else { return }
         isSaving = true; errorMessage = nil
         defer { isSaving = false }
         do {
             if let avatarData { try await container.profiles.uploadAvatar(avatarData) }
-            let cleanCity = sanitizer.sanitizeCity(city)
+            let cleanCity = Self.sanitizer.sanitizeCity(city)
             try await container.profiles.updateProfile(ProfileUpdate(
-                displayName: sanitizer.sanitizeDisplayName(displayName),
+                displayName: Self.sanitizer.sanitizeDisplayName(displayName),
                 city: cleanCity.isEmpty ? nil : cleanCity,
                 timezone: TimeZone.current.identifier,
                 locale: Locale.current.identifier
