@@ -190,6 +190,68 @@ final class FeedViewModelTests: XCTestCase {
         XCTAssertNotNil(model.deleteError, "a failed delete must surface an error")
     }
 
+    /// The safety property `deletePost` actually depends on: the tombstone goes into
+    /// `deletedPostIDs` **only after** `delete_post` has confirmed. Nothing else in this suite can
+    /// fail if that ordering breaks —
+    /// `testFailedDeletePostLeavesTheListUnchangedAndSurfacesAnError` never refreshes, so it never
+    /// consults the tombstone set at all, and
+    /// `testRefreshCannotResurrectAPostDeletedWhileItsPageRequestWasInFlight`'s delete is injected
+    /// as a success, so it can't distinguish "inserted after confirmation" from "inserted before
+    /// the request". Hoisting `deletedPostIDs.insert(post.id)` above
+    /// `try await deletePostRequest(post.id)` leaves both of them green.
+    ///
+    /// What that regression costs in production: `delete_post` is rate-limited (60/hour), so a
+    /// rejected delete is a routine outcome, not a hypothetical. With the insert hoisted, one
+    /// rate-limited delete tombstones a post the server still holds, and `fetchFirstPage()` — which
+    /// backs `load()` *and* `refresh()* — filters it out of every page for the rest of the process.
+    /// (`fetchFirstPage()` is the shared body of both; `loadMore()` is unaffected by construction.)
+    /// The post is live, visible to everyone else, and permanently invisible to its own author, who
+    /// was just told the delete failed.
+    ///
+    /// The flip: a failed delete followed by a refresh. The injected `page` closure keeps returning
+    /// the post — exactly what the server does, since it was never deleted — so the post must come
+    /// back. Under the hoist the refresh filters it out and `posts` is empty.
+    func testFailedDeleteDoesNotTombstoneThePostSoALaterRefreshStillShowsIt() async throws {
+        let config = AppConfig(environment: .development,
+                               supabaseURL: URL(string: "https://unreachable.invalid")!,
+                               supabaseAnonKey: "k", universalHost: "unreachable.invalid")
+        let container = AppContainer(config: config)
+
+        let postID = UUID()
+        let seeded = FeedPostDTO(postId: postID, authorId: UUID(), displayName: "Barnaby",
+                                 avatarPath: nil, body: "never actually deleted", imagePath: nil,
+                                 placeLabel: nil, pubId: nil, createdAtRaw: "2026-08-12T12:00:00.000Z",
+                                 cheersCount: 0, viewerHasCheered: false, commentCount: 0)
+
+        var deleteAttempts = 0
+        let model = FeedViewModel(
+            container: container,
+            page: { _, _ in [seeded] },
+            deletePost: { _ in
+                deleteAttempts += 1
+                // The realistic rejection: post_delete is capped at 60/hour, so the server keeps
+                // the row and says no.
+                throw SupabaseError.rateLimited(hint: "Please slow down and try again shortly.")
+            })
+
+        await model.load()
+        XCTAssertEqual(model.posts.map(\.id), [postID], "sanity: the post is loaded before the delete")
+
+        await model.deletePost(model.posts.first!)
+        XCTAssertEqual(deleteAttempts, 1, "sanity: the delete was actually attempted")
+        XCTAssertNotNil(model.deleteError, "sanity: the rejection surfaced")
+        XCTAssertEqual(model.posts.map(\.id), [postID], "the rejected delete must leave the post in place")
+
+        // The part no existing test reaches: the tombstone set is only consulted by
+        // `fetchFirstPage()`, so the damage from a premature insert is invisible until a refresh.
+        await model.refresh()
+
+        XCTAssertEqual(model.posts.map(\.id), [postID],
+                       "a post whose delete the server rejected must survive a refresh — a " +
+                       "tombstone written before the server confirmed would filter a live post " +
+                       "out of every fetchFirstPage for the rest of the session")
+    }
+
     /// Code review's Important finding: `deletePost` and `refresh()` don't know about each other.
     /// `refresh()`'s `fetchFirstPage()` replaces `posts` wholesale from a fresh `feed_page` read —
     /// if that read is issued *before* `delete_post`'s `UPDATE ... deleted_at` commits, but its
