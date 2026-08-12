@@ -25,7 +25,13 @@ final class SessionController {
         self.container = container
     }
 
+    /// Launch-time work, called once from `CheekyPintApp`'s root `.task`.
+    ///
+    /// The sweep comes first, before any early return below, because it must happen on every
+    /// launch regardless of which phase the app resolves to — including the `-uiTestDemo` and
+    /// friend-circle paths, and including a launch that ends signed out.
     func bootstrap() async {
+        sweepStaleTemporaryExports()
         #if DEBUG
         // Deterministic entry for UI-test screenshots: boot straight into demo mode.
         if ProcessInfo.processInfo.arguments.contains("-uiTestDemo") {
@@ -39,6 +45,25 @@ final class SessionController {
             return
         }
         phase = .signedOut
+    }
+
+    /// Deletes anything left in `DataExportView.exportDirectory` from a previous run.
+    ///
+    /// `DataExportView` already bounds the file on both ends within a session — it sweeps before
+    /// each new export and again on `.onDisappear` — but neither runs if the process dies while
+    /// that screen is open: a force-quit or an OOM kill fires no `.onDisappear`, and iOS's `tmp`
+    /// reclamation is opportunistic, not scheduled. Without this call there is no code path left
+    /// that will ever remove the file, and the file is a complete personal-data dump: profile,
+    /// pint diary (health-adjacent under this project's own reading), posts and comments, friends,
+    /// blocks placed, reports filed. An unbounded retention window for that is not defensible
+    /// under DSGVO Art. 5(1)(e) storage limitation, which the app must satisfy under Austrian DSG.
+    ///
+    /// Deliberately unconditional and ignoring its own result: `clearExportDirectory()` is
+    /// idempotent and a missing directory is the normal case (see
+    /// `DataExportTests.testClearExportDirectoryIsIdempotentAcrossRepeatedCalls`, which covers
+    /// exactly this nothing-to-clear path). Housekeeping must never be able to fail a launch.
+    private func sweepStaleTemporaryExports() {
+        DataExportView.clearExportDirectory()
     }
 
     /// Reload the profile and decide whether onboarding is complete. The gate is a recorded

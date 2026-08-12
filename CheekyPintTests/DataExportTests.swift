@@ -190,13 +190,71 @@ final class DataExportTests: XCTestCase {
                        "leaving the export screen must not leave a full personal-data export sitting in tmp")
     }
 
-    /// `clearExportDirectory()` must not throw / must be a no-op when there is nothing to clear
-    /// (e.g. the very first launch, or calling it twice in a row) — the export screen calls it
-    /// unconditionally from `.onDisappear` whether or not an export ever ran.
-    func testClearExportDirectoryIsSafeToCallWhenNothingExists() {
+    /// Replaces `testClearExportDirectoryIsSafeToCallWhenNothingExists`, which created no file and
+    /// therefore passed verbatim against `static func clearExportDirectory() {}` — it proved only
+    /// "doesn't crash", which `try?`'s signature already guarantees.
+    ///
+    /// Real idempotency needs something to remove first: write a file, clear repeatedly, and
+    /// require both the file and the directory to be gone and a subsequent export to still work.
+    /// The nothing-to-clear path this covers is load-bearing now that `SessionController.bootstrap`
+    /// calls `clearExportDirectory()` on every launch — on a clean install, and on every launch
+    /// after the first, that call finds nothing, and it must neither fail nor leave the directory
+    /// in a state the next export can't be written into.
+    func testClearExportDirectoryIsIdempotentAcrossRepeatedCalls() throws {
+        let url = try DataExportView.write(Data("export-body".utf8), filename: "cheekypint-export-2026-08-12.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "sanity: something must exist to remove")
+
         DataExportView.clearExportDirectory()
+        DataExportView.clearExportDirectory() // the nothing-to-clear path a normal launch hits
         DataExportView.clearExportDirectory()
-        // No crash, no thrown error reaching here — that is the assertion.
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path),
+                       "the first call must actually remove the file — a no-op implementation " +
+                       "passes a test that never wrote one")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: DataExportView.exportDirectory.path),
+                       "the directory itself must be gone, not just emptied")
+
+        // Repeated clears must not leave the directory unusable: the launch sweep runs before any
+        // export, so a sweep that broke the next `write` would break the feature outright.
+        let again = try DataExportView.write(Data("second-export".utf8), filename: "cheekypint-export-2026-08-13.json")
+        XCTAssertEqual(try Data(contentsOf: again), Data("second-export".utf8),
+                       "an export must still be writable after repeated sweeps")
+    }
+
+    // MARK: Launch-time sweep — the one gap `.onDisappear` cannot cover
+    //
+    // `DataExportView` sweeps before each export and again on `.onDisappear`, but a process that
+    // dies while that screen is open fires no `.onDisappear`: a force-quit or an OOM kill leaves a
+    // complete personal-data dump in `tmp` with no remaining code path that will ever remove it,
+    // since iOS's `tmp` reclamation is opportunistic rather than scheduled. DSGVO Art. 5(1)(e)
+    // storage limitation makes an unbounded window there indefensible.
+
+    /// Models exactly that: a file left behind by a previous run, then a launch.
+    /// `SessionController.bootstrap()` is the app's launch-time work (`CheekyPintApp`'s root
+    /// `.task` calls it), and the sweep is the first thing it does — before every early return, so
+    /// it happens whichever phase the launch resolves to.
+    ///
+    /// The flip point: delete the `sweepStaleTemporaryExports()` call from `bootstrap()` and the
+    /// leftover file is still there afterwards.
+    @MainActor
+    func testLaunchBootstrapSweepsAnExportLeftBehindByAForceQuit() async throws {
+        let leftover = try DataExportView.write(
+            Data(#"{"profile":{},"pints":[],"posts":[]}"#.utf8),
+            filename: "cheekypint-export-2026-08-11.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: leftover.path),
+                      "sanity: the previous run's export must exist before the launch")
+
+        let config = AppConfig(environment: .development,
+                               supabaseURL: URL(string: "https://unreachable.invalid")!,
+                               supabaseAnonKey: "k", universalHost: "unreachable.invalid")
+        let session = SessionController(container: AppContainer(config: config))
+
+        await session.bootstrap()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: leftover.path),
+                       "launching must sweep a personal-data export orphaned by a force-quit — " +
+                       "nothing else ever will: .onDisappear never fired and iOS tmp reclamation " +
+                       "is opportunistic")
         XCTAssertFalse(FileManager.default.fileExists(atPath: DataExportView.exportDirectory.path))
     }
 }
