@@ -34,7 +34,7 @@ struct LogPintSheet: View {
     static let noteColumnLimit = 280
 
     /// What is left of that 280 for the user's own words, once the longest `[Beer: …]` line the
-    /// catalog can prepend and the space joining them are accounted for.
+    /// catalog can prepend and the newline joining them are accounted for.
     ///
     /// Derived rather than hard-coded, so adding a beer with a longer name or glass note tightens
     /// this automatically instead of silently pushing a note that used to fit past the column bound.
@@ -43,16 +43,20 @@ struct LogPintSheet: View {
     /// a slightly conservative one.
     static let noteLimit = noteColumnLimit - 1 - (
         BeerCatalog.beers
-            .map { sanitizer.sanitizedLength(BeerCatalog.beerLine(for: $0), allowNewlines: false) }
+            .map { sanitizer.sanitizedLength(BeerCatalog.beerLine(for: $0), allowNewlines: true) }
             .max() ?? 0
     )
 
-    /// How long the note will be **once stored**, in the code points Postgres counts. Measured with
-    /// `allowNewlines: false` because the column genuinely cannot hold a line break (see
-    /// `BeerCatalog.diaryNote`), so a typed newline becomes a space here rather than being counted
-    /// and then deleted server-side.
+    /// How long the note will be **once stored**, in the code points Postgres counts.
+    ///
+    /// `allowNewlines: true`, and the newlines count. The field is `axis: .vertical`, so the user can
+    /// type paragraph breaks; this used to pass `false`, which flattened them to spaces before the
+    /// text ever left the device. That was a workaround for `create_pint_entry` deleting `chr(10)`
+    /// server-side — the client was made to agree with a server bug instead of the other way round.
+    /// `create_pint_entry` now uses `strip_ugc_control_chars_multiline`, so the breaks survive, and
+    /// they occupy one code point each against `left(…, 280)` exactly as this count assumes.
     static func noteLength(of raw: String) -> Int {
-        sanitizer.sanitizedLength(raw, allowNewlines: false)
+        sanitizer.sanitizedLength(raw, allowNewlines: true)
     }
 
     /// Logging is blocked past the limit rather than letting `left(…, 280)` drop the tail — the same
@@ -61,9 +65,10 @@ struct LogPintSheet: View {
         noteLength(of: raw) <= noteLimit
     }
 
-    /// The note as it will be sent: Trojan-Source-stripped, whitespace-collapsed, single-line.
+    /// The note as it will be sent: Trojan-Source-stripped, whitespace-collapsed, line breaks kept
+    /// (collapsed to at most one blank line, which is what the server's multiline stripper also does).
     static func sanitizedNote(_ raw: String) -> String {
-        sanitizer.sanitize(raw, allowNewlines: false, maxLength: noteLimit)
+        sanitizer.sanitize(raw, allowNewlines: true, maxLength: noteLimit)
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -404,15 +409,20 @@ enum BeerCatalog {
         "[Beer: \(beer.name)] \(beer.glassNote)"
     }
 
-    /// **Joined with a space, not a newline.** `create_pint_entry` runs
-    /// `strip_ugc_control_chars(p_private_note)`, which deletes `chr(10)` along with every other C0
-    /// control character, so this column cannot hold a line break: a newline separator would be
-    /// removed server-side and glue the glass note straight onto the user's first word
-    /// (`…like a witness.My round`). Pinned by `t54` in `supabase/tests/rls_rpc_suite.sql`.
+    /// Joined with a newline, so the app-authored beer line and the user's own words are separate
+    /// paragraphs — which is how this read before the space-join, and how it reads in the Art. 15
+    /// export, the one place the note comes back to its author.
+    ///
+    /// The space-join existed only because `create_pint_entry` ran the single-line
+    /// `strip_ugc_control_chars`, which deletes `chr(10)`: a newline separator was removed
+    /// server-side and glued the glass note onto the user's first word (`…like a witness.My round`).
+    /// The RPC now uses `strip_ugc_control_chars_multiline`, so the break survives — pinned by `t54`
+    /// in `supabase/tests/rls_rpc_suite.sql`. The separator still costs exactly one code point
+    /// against the 280, so `LogPintSheet.noteLimit` is unchanged.
     static func diaryNote(for beer: BeerChoice, userNote: String) -> String {
         let beerLine = beerLine(for: beer)
         guard !userNote.isEmpty else { return beerLine }
-        return "\(beerLine) \(userNote)"
+        return "\(beerLine)\n\(userNote)"
     }
 
     static func beerName(in note: String?) -> String? {

@@ -102,12 +102,33 @@ final class FreeTextWriteSurfaceTests: XCTestCase {
             "no format-category scalar may be stored")
     }
 
-    /// The note is sanitised single-line, so a typed newline becomes a space instead of being deleted
-    /// server-side and gluing two words into one.
-    func testANoteWithNewlinesKeepsItsWordsApart() {
-        XCTAssertEqual(LogPintSheet.sanitizedNote("first\nsecond"), "first second")
-        XCTAssertEqual(LogPintSheet.sanitizedNote("first\n\n\nsecond"), "first second",
-                       "collapsed, not multiplied into a run of spaces")
+    /// The note field is `axis: .vertical`, so a typed paragraph break must survive — it used to be
+    /// flattened to a space here, before the text ever left the device, to match a server that deleted
+    /// it. Blank-line runs still collapse to one, exactly as `strip_ugc_control_chars_multiline` does,
+    /// so client and server agree on the stored value.
+    func testANoteKeepsItsLineBreaks() {
+        XCTAssertEqual(LogPintSheet.sanitizedNote("first\nsecond"), "first\nsecond",
+                       "a single break must survive, not become a space")
+        XCTAssertEqual(LogPintSheet.sanitizedNote("first\n\nsecond"), "first\n\nsecond",
+                       "one blank line is an ordinary paragraph break")
+        XCTAssertEqual(LogPintSheet.sanitizedNote("first\n\n\n\n\nsecond"), "first\n\nsecond",
+                       "a run of blank lines collapses to one, matching the server")
+        XCTAssertEqual(LogPintSheet.sanitizedNote("first\tsecond"), "first second",
+                       "a tab is still not a line break")
+    }
+
+    /// The newlines count against the limit, because `left(…, 280)` counts them. Flipped by making the
+    /// breaks free: 10 breaks in an otherwise at-limit note must push it over.
+    func testLineBreaksCountAgainstTheNoteLimit() {
+        let limit = LogPintSheet.noteLimit
+        let words = String(repeating: "z", count: limit - 10)
+        let withBreaks = words + String(repeating: "\nx", count: 5)
+
+        XCTAssertEqual(LogPintSheet.noteLength(of: withBreaks), limit,
+                       "5 breaks + 5 characters on top of limit-10 is exactly the limit")
+        XCTAssertTrue(LogPintSheet.noteWithinLimit(withBreaks))
+        XCTAssertFalse(LogPintSheet.noteWithinLimit(withBreaks + "\ny"),
+                       "one more break plus one more character must not fit")
     }
 
     /// Whitespace-only notes leave the column NULL via the RPC's `nullif(…, '')`; the client must not
@@ -129,9 +150,9 @@ final class FreeTextWriteSurfaceTests: XCTestCase {
 
         let composed = BeerCatalog.diaryNote(for: longest, userNote: LogPintSheet.sanitizedNote(atLimit))
 
-        XCTAssertEqual(sanitizer.sanitizedLength(composed, allowNewlines: false),
+        XCTAssertEqual(sanitizer.sanitizedLength(composed, allowNewlines: true),
                        LogPintSheet.noteColumnLimit,
                        "the worst case must land exactly on 280, not over it")
-        XCTAssertTrue(composed.contains("] "), "the beer line and the note must stay separated")
+        XCTAssertTrue(composed.contains("\n"), "the beer line and the note must stay separate paragraphs")
     }
 }

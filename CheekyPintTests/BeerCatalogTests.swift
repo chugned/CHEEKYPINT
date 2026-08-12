@@ -30,20 +30,19 @@ final class BeerCatalogTests: XCTestCase {
 
     // MARK: - The composed note must survive `create_pint_entry`'s sanitiser
 
-    /// `strip_ugc_control_chars` deletes `chr(10)` along with every other C0 control character, so
-    /// `pint_entries.private_note` cannot hold a line break (pinned by `t54`). A newline separator
-    /// would therefore be removed server-side and glue the glass note onto the user's first word, so
-    /// the two halves are joined with a space.
-    func testDiaryNoteJoinsTheTwoHalvesWithASpaceNotANewline() {
+    /// The app-authored beer line and the user's own words are separate paragraphs. This asserted the
+    /// opposite one commit ago: the space-join existed only because `create_pint_entry` ran the
+    /// single-line `strip_ugc_control_chars`, which deletes `chr(10)`, so a newline separator was
+    /// removed server-side and glued the glass note onto the user's first word.
+    /// `strip_ugc_control_chars_multiline` keeps it (pinned by `t54`).
+    func testDiaryNoteJoinsTheTwoHalvesWithANewline() {
         let beer = BeerCatalog.beers[0]
         let note = BeerCatalog.diaryNote(for: beer, userNote: "My round, apparently")
 
-        XCTAssertFalse(note.contains("\n"),
-                       "a newline here is deleted by the server's strip, gluing the halves together")
-        XCTAssertTrue(note.hasSuffix(" My round, apparently"),
-                      "the user's words must stay separated from the beer line: \(note)")
-        XCTAssertTrue(note.hasPrefix(BeerCatalog.beerLine(for: beer)),
-                      "and the beer line must still come first, for beerName(in:) to parse")
+        XCTAssertEqual(note, BeerCatalog.beerLine(for: beer) + "\nMy round, apparently",
+                       "the beer line, one break, then the user's words — nothing else")
+        XCTAssertEqual(note.filter { $0 == "\n" }.count, 1,
+                       "exactly one separator, so the newline's single code point is all noteLimit reserves")
         XCTAssertEqual(BeerCatalog.beerName(in: note), beer.name,
                        "the round trip HomeViewModel relies on must still work")
     }
