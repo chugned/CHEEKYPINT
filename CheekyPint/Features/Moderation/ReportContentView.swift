@@ -26,6 +26,45 @@ struct ReportContentView: View {
     @Environment(\.container) private var container
     @Environment(\.dismiss) private var dismiss
 
+    /// Mirrors both report RPCs' `left(coalesce(p_details, ''), 1000)`
+    /// (`20260811000700_rpc_feed_reports.sql`).
+    static let detailsLimit = 1000
+
+    /// Shared with the composers' reasoning: the counter and the Send gate must measure what will
+    /// be **stored**, in the code points Postgres counts — see `ProfileTextSanitizer`.
+    private static let sanitizer = ProfileTextSanitizer()
+
+    /// Cleans the free-text details before they leave the device.
+    ///
+    /// This was the one write surface in the app with no sanitisation and no bound: `details` went
+    /// out raw, and unlike `create_post`/`add_comment` the report RPCs applied only `left(…, 1000)`
+    /// with no `strip_ugc_control_chars`, so a bidi-override or zero-width payload landed verbatim
+    /// in `reports.details` — which a human moderator then reads, in a context where scrambled or
+    /// spoofed display text is exactly the kind of thing being reported. The server side is fixed
+    /// in the same change; this is the client half of the same defence the other two write paths
+    /// have always had.
+    ///
+    /// Returns `nil` for empty input, matching `ReportUserView.send()`'s `details.isEmpty ? nil :
+    /// details` convention — whitespace-only details are nothing to tell a moderator, and `nil`
+    /// keeps them out of the column rather than storing an empty string.
+    static func sanitizedDetails(_ raw: String) -> String? {
+        let clean = sanitizer.sanitize(raw, allowNewlines: true, maxLength: detailsLimit)
+        return clean.isEmpty ? nil : clean
+    }
+
+    /// How long the details will be once stored, for the live counter.
+    static func detailsLength(of raw: String) -> Int {
+        sanitizer.sanitizedLength(raw, allowNewlines: true)
+    }
+
+    /// Details are optional, so the only thing this gates is the upper bound — and it disables Send
+    /// past the limit rather than letting `left(…, 1000)` drop the tail, for the same reason the
+    /// two composers do: a report whose last paragraph vanished silently is worse than a report
+    /// the user was told to shorten.
+    static func detailsWithinLimit(_ raw: String) -> Bool {
+        detailsLength(of: raw) <= detailsLimit
+    }
+
     let target: ReportTarget
 
     @State private var category: ReportCategory
@@ -85,6 +124,14 @@ struct ReportContentView: View {
                         .lineLimit(3...6)
                         .accessibilityIdentifier("report-content-details")
                         .accessibilityLabel("Details")
+                    HStack {
+                        Spacer(minLength: 0)
+                        Text("\(detailsLength)/\(Self.detailsLimit)")
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(isOverLimit ? Theme.Palette.warning : Theme.Palette.textSecondary)
+                            .accessibilityIdentifier("report-content-details-counter")
+                            .accessibilityLabel("\(detailsLength) of \(Self.detailsLimit) characters used")
+                    }
                 }
                 if sent {
                     Label("Thanks — our team will take a look.", systemImage: "checkmark.circle.fill")
@@ -111,7 +158,7 @@ struct ReportContentView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Send") { Task { await send() } }
-                        .disabled(isSending || sent)
+                        .disabled(isSending || sent || isOverLimit)
                         .accessibilityIdentifier("report-content-send")
                         .accessibilityLabel("Send report")
                 }
@@ -126,12 +173,22 @@ struct ReportContentView: View {
         }
     }
 
+    private var detailsLength: Int { Self.detailsLength(of: details) }
+
+    private var isOverLimit: Bool { !Self.detailsWithinLimit(details) }
+
     private func send() async {
+        // `.disabled` alone is the weaker guard: the Button's action fires from its own `Task`, and
+        // SwiftUI can dispatch a second tap before the first re-render flips `isSending`, so a
+        // double-tap could file two reports. Every other write surface in this feature checks the
+        // flag in the action too (`ComposePostSheet.submit`, `DataExportView.export`,
+        // `PostCommentsViewModel.send`/`delete`); this one didn't.
+        guard !isSending, !sent else { return }
         isSending = true; errorMessage = nil
         defer { isSending = false }
         do {
             try await Self.report(
-                target: target, category: category, details: details.isEmpty ? nil : details,
+                target: target, category: category, details: Self.sanitizedDetails(details),
                 reportPost: { try await container.feed.reportPost($0, category: $1, details: $2) },
                 reportComment: { try await container.feed.reportComment($0, category: $1, details: $2) }
             )

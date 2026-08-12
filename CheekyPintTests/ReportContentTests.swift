@@ -95,4 +95,63 @@ final class ReportContentTests: XCTestCase {
         )
         XCTAssertEqual(forwardedDetails, "", "report(...) forwards details verbatim; nil-conversion is send()'s job")
     }
+
+    // MARK: - sanitizedDetails
+    //
+    // This was the only write surface in the app that forwarded free text raw and unbounded. What
+    // makes it worse than the others rather than merely equal to them: `reports.details` is read by
+    // a **human moderator**, deciding whether reported text is abusive, so a bidi override or a
+    // zero-width run in the details is a payload aimed at the person adjudicating it. The server
+    // half of this fix adds `strip_ugc_control_chars` to both report RPCs (pinned by t43e in
+    // supabase/tests/rls_rpc_suite.sql); this is the client half, matching what
+    // `create_post`/`add_comment`'s callers have always done.
+
+    /// The exact Trojan Source shapes `ProfileTextSanitizer` exists for, in the details field.
+    func testSanitizedDetailsStripsBidiOverridesAndZeroWidthCharacters() throws {
+        let payload = "ab\u{200B}us\u{202E}i\u{2060}ve"
+        let clean = try XCTUnwrap(ReportContentView.sanitizedDetails(payload))
+        XCTAssertEqual(clean, "abusive",
+                       "a zero-width space, a right-to-left override and a word joiner must all be " +
+                       "gone before a moderator reads this")
+        XCTAssertFalse(clean.unicodeScalars.contains { $0.properties.generalCategory == .format },
+                       "no format-category scalar may survive into the moderation queue")
+    }
+
+    /// Bounded to the server's own `left(coalesce(p_details, ''), 1000)`, measured in the code
+    /// points Postgres counts. 1000 is a literal: the constant exists only to mirror that SQL.
+    func testSanitizedDetailsIsBoundedToTheServerLimitInCodePoints() throws {
+        XCTAssertEqual(ReportContentView.detailsLimit, 1000,
+                       "must mirror the report RPCs' left(coalesce(p_details, ''), 1000)")
+
+        let ascii = try XCTUnwrap(ReportContentView.sanitizedDetails(String(repeating: "z", count: 1500)))
+        XCTAssertEqual(ascii.unicodeScalars.count, 1000)
+
+        // 800 NFD characters is 1600 code points: a grapheme-based bound would pass it straight
+        // through for the server to cut.
+        let nfd = try XCTUnwrap(ReportContentView.sanitizedDetails(String(repeating: "a\u{0308}", count: 800)))
+        XCTAssertEqual(nfd.unicodeScalars.count, 1000,
+                       "the bound must be in the unit left(…, 1000) counts")
+    }
+
+    /// Send is disabled past the limit rather than letting the tail vanish silently — the same rule
+    /// the two composers follow. Details are optional, so within-limit-and-empty must stay allowed.
+    func testDetailsOverTheLimitBlocksSendButEmptyDetailsDoNot() {
+        XCTAssertTrue(ReportContentView.detailsWithinLimit(""), "details are optional")
+        XCTAssertTrue(ReportContentView.detailsWithinLimit(String(repeating: "z", count: 1000)),
+                      "exactly 1000 must still be sendable")
+        XCTAssertFalse(ReportContentView.detailsWithinLimit(String(repeating: "z", count: 1001)),
+                       "1001 characters must block Send, not lose the 1001st on send")
+        XCTAssertFalse(ReportContentView.detailsWithinLimit(String(repeating: "a\u{0308}", count: 501)),
+                       "1002 code points must block Send even though it is only 501 characters")
+    }
+
+    /// Whitespace-only details are nothing to tell a moderator: they must arrive as `nil`, keeping
+    /// the column empty rather than storing a blank string.
+    func testWhitespaceOnlyDetailsBecomeNil() {
+        XCTAssertNil(ReportContentView.sanitizedDetails(""))
+        XCTAssertNil(ReportContentView.sanitizedDetails("   \n\t "))
+        XCTAssertNil(ReportContentView.sanitizedDetails("\u{200B}\u{202E}"),
+                     "details consisting only of invisible characters are empty once stripped")
+        XCTAssertEqual(ReportContentView.sanitizedDetails("  rude  "), "rude")
+    }
 }

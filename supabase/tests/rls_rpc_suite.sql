@@ -804,6 +804,60 @@ do $$ declare v_post uuid; v_comment uuid; v jsonb; ss text; begin
   raise notice 'PASS t43d: cannot report a comment on a post you cannot see';
 end $$;
 
+-- t43e: report details are stripped of control/zero-width/bidi characters before storage, exactly
+-- like create_post's body and add_comment's body. Both report RPCs previously applied only
+-- left(..., 1000), so a bidi override or a zero-width run landed verbatim in reports.details — the
+-- one column whose whole purpose is to be read by a human moderator deciding whether text is
+-- abusive, i.e. the worst place to let a reporter scramble or spoof what is displayed.
+--
+-- The payload mixes every class strip_ugc_control_chars handles: a zero-width space (8203), a
+-- right-to-left override (8237), a word joiner (8288), an isolate pair (8294/8297), and a C0
+-- control (a tab, 9). The expectation is a literal, not a re-derivation of the input, so the
+-- assertion cannot pass by accident.
+--
+-- Note the tab is *deleted*, not turned into a space: `[[:cntrl:]]` removes it, so 've' and 'text'
+-- run together. That differs from the client's ProfileTextSanitizer, which maps tabs to spaces
+-- before sending precisely so words don't get glued — the same divergence create_post has always
+-- had, and harmless because the client sanitises first. Pinned here as the server's own behaviour
+-- rather than quietly assumed.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
+do $$
+declare v jsonb; v_post uuid; v_comment uuid; v_details text; v_payload text;
+begin
+  v_payload := 'ab' || chr(8203) || 'us' || chr(8237) || 'i' || chr(8288) || 've' ||
+               chr(8294) || 'x' || chr(8297) || chr(9) || 'text';
+
+  -- report_post: Alice reports one of Barnaby's posts (she can see it; they are friends).
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000b2', false);
+  select public.create_post('t43e setup: Barnaby post for the details-stripping check', null, null, null) into v;
+  v_post := (v->>'post_id')::uuid;
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000a1', false);
+
+  select public.report_post(v_post, 'inappropriate_text', v_payload) into v;
+  select details into v_details from public.reports where id = (v->>'report_id')::uuid;
+  if v_details is distinct from 'abusivextext' then
+    raise exception 'FAIL t43e: report_post stored details % (want ''abusivextext'')', v_details; end if;
+
+  -- report_comment: same payload, same requirement.
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000b2', false);
+  select public.add_comment(v_post, 'Barnaby comment for the details-stripping check', null) into v;
+  v_comment := (v->>'comment_id')::uuid;
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000a1', false);
+
+  select public.report_comment(v_comment, 'inappropriate_text', v_payload) into v;
+  select details into v_details from public.reports where id = (v->>'report_id')::uuid;
+  if v_details is distinct from 'abusivextext' then
+    raise exception 'FAIL t43e: report_comment stored details % (want ''abusivextext'')', v_details; end if;
+
+  -- The length bound still applies on top of the stripping.
+  select public.report_post(v_post, 'inappropriate_text', repeat('z', 1500)) into v;
+  select details into v_details from public.reports where id = (v->>'report_id')::uuid;
+  if char_length(v_details) <> 1000 then
+    raise exception 'FAIL t43e: details length % (want 1000)', char_length(v_details); end if;
+
+  raise notice 'PASS t43e: report_post/report_comment strip control, zero-width and bidi characters from details';
+end $$;
+
 -- ============================ FEED: comment_count block/soft-delete parity (I1) ============================
 -- feed_page's comment_count previously counted every non-deleted comment regardless of the
 -- viewer's relationship to the comment's author, while post_comments_page (the actual thread
