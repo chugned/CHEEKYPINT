@@ -118,7 +118,7 @@ If `ProfileRepository(data: .preview)` or `activateForTesting()` do not exist un
 ```bash
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 xcodebuild test -project CheekyPint.xcodeproj -scheme CheekyPint \
-  -destination 'platform=iOS Simulator,name=iPhone 16' \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
   -only-testing:CheekyPintTests/DemoComposeTests 2>&1 | tail -20
 ```
 Expected: compile failure — `writeLocalPostImage` and the 4-argument `createPost` do not exist.
@@ -164,7 +164,7 @@ The location key fixes a **pre-existing bug unrelated to Part 2**: `LocationServ
 ```bash
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 xcodebuild test -project CheekyPint.xcodeproj -scheme CheekyPint \
-  -destination 'platform=iOS Simulator,name=iPhone 16' 2>&1 | tail -30
+  -destination 'platform=iOS Simulator,name=iPhone 17' 2>&1 | tail -30
 swift test --package-path CheekyPintCore 2>&1 | tail -10
 ```
 `OnboardingUITests.testWelcomeShowsResponsibleUseAndAgeGate` fails on the clean base — ignore that one, but nothing else may regress.
