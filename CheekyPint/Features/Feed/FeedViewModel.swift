@@ -42,9 +42,17 @@ final class FeedViewModel {
 
     private let pageSize: Int
 
-    init(container: AppContainer, pageSize: Int = 20) {
+    /// The one seam this view model needs for testing: how a Cheers tap is sent. Defaults to
+    /// the real repository call; a test can inject a canned response instead, without a protocol
+    /// hierarchy or a mock framework, to prove reconciliation reads from *that* response rather
+    /// than from the optimistic guess computed before it arrives.
+    private let toggleCheersRequest: (UUID) async throws -> ToggleCheersDTO
+
+    init(container: AppContainer, pageSize: Int = 20,
+         toggleCheers: ((UUID) async throws -> ToggleCheersDTO)? = nil) {
         self.container = container
         self.pageSize = pageSize
+        self.toggleCheersRequest = toggleCheers ?? { try await container.feed.toggleCheers(postID: $0) }
     }
 
     /// First load. Clears any existing posts up front so a retry after an error doesn't show
@@ -108,7 +116,7 @@ final class FeedViewModel {
         posts[index].cheersCount = max(0, previousCount + (posts[index].viewerHasCheered ? 1 : -1))
 
         do {
-            let result = try await container.feed.toggleCheers(postID: post.id)
+            let result = try await toggleCheersRequest(post.id)
             reconcile(postID: post.id, cheered: result.cheered, cheersCount: result.cheersCount)
         } catch let error as SupabaseError {
             reconcile(postID: post.id, cheered: previousCheered, cheersCount: previousCount)

@@ -10,6 +10,25 @@ struct FeedPostCard: View {
     let imageURL: URL?
     let onToggleCheers: () -> Void
 
+    /// Built once and reused by every row — `RelativeDateTimeFormatter` is expensive to
+    /// construct, so it must never be created inside `body`, which SwiftUI re-evaluates often.
+    /// Abbreviated for the visible caption ("30 min. ago" rather than `Text(_:style:.relative)`'s
+    /// "30 min, 7 secs"/"1 hr, 30 min" compound form).
+    private static let relativeTimeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
+
+    /// Same formatter, spelled out in full, for VoiceOver — an abbreviated unit read aloud
+    /// ("30 min ago") is worse than the full word ("30 minutes ago"), so the accessibility label
+    /// uses this one instead of the visible text.
+    private static let relativeTimeAccessibilityFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }()
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             header
@@ -29,9 +48,11 @@ struct FeedPostCard: View {
                     .font(Theme.Typography.headline)
                     .foregroundStyle(Theme.Palette.textPrimary)
                 if let createdAt = post.post.createdAt {
-                    Text(createdAt, style: .relative)
+                    Text(Self.relativeTimeFormatter.localizedString(for: createdAt, relativeTo: Date()))
                         .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.Palette.textSecondary)
+                        .accessibilityLabel(Self.relativeTimeAccessibilityFormatter.localizedString(
+                            for: createdAt, relativeTo: Date()))
                 }
             }
             Spacer(minLength: 0)
@@ -63,9 +84,7 @@ struct FeedPostCard: View {
                     case .success(let image):
                         image.resizable().scaledToFill()
                     case .failure:
-                        Image(systemName: "photo")
-                            .font(.system(size: 28))
-                            .foregroundStyle(Theme.Palette.textSecondary)
+                        photoUnavailablePlaceholder
                     }
                 }
             }
@@ -74,6 +93,22 @@ struct FeedPostCard: View {
             .clipped()
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
         }
+    }
+
+    /// The failure phase, styled to read as "this photo just isn't available right now" rather
+    /// than as a broken image the viewer should do something about — muted icon and caption,
+    /// both `Theme.Palette.textSecondary`, no warning colour. Kept (never hidden): losing the
+    /// photo area entirely would also lose the place it holds in the card's layout.
+    private var photoUnavailablePlaceholder: some View {
+        VStack(spacing: Theme.Spacing.xxs) {
+            Image(systemName: "photo")
+                .font(.system(size: 28))
+            Text("Photo unavailable")
+                .font(Theme.Typography.caption)
+        }
+        .foregroundStyle(Theme.Palette.textSecondary)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Photo could not be loaded")
     }
 
     @ViewBuilder
