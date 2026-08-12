@@ -19,6 +19,7 @@ struct SettingsView: View {
             Section("Privacy") {
                 NavigationLink { PrivacySettingsView() } label: { Label("Privacy settings", systemImage: "lock.shield") }
                 NavigationLink { BlockedUsersView() } label: { Label("Blocked users", systemImage: "hand.raised") }
+                NavigationLink { DataExportView() } label: { Label("Download my data", systemImage: "square.and.arrow.down") }
             }
             Section("Safety") {
                 NavigationLink { LegalDocumentView(document: .responsibleDrinking) } label: {

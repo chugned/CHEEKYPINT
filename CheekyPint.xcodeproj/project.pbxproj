@@ -16,6 +16,7 @@
 		1493AAF601EB37069B03A59F /* CheekyPintCore in Frameworks */ = {isa = PBXBuildFile; productRef = 3944AB594F63E73C31B40B8C /* CheekyPintCore */; };
 		16FEE497622C5F68DCC4A339 /* CryptoNonce.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E1EBF06157D81B3B210A5EF /* CryptoNonce.swift */; };
 		1ADF0AA8A0192258D9604138 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE19D454DDC06A49CAC8D711 /* Haptics.swift */; };
+		1AF4FBAB60E8D455411B5138 /* DataExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88B1AE6C6814A09B22738CFA /* DataExportTests.swift */; };
 		1B9518160287F81B5593D4CF /* AppContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7B605D6157025E5052A6F50 /* AppContainer.swift */; };
 		1E5996CED6C52C989BC15279 /* PostCommentsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBA751D685867DE7C001198D /* PostCommentsSheet.swift */; };
 		1E82F0E23EB6D6A6197C1153 /* OnboardingSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73129C976C9C5C5DC90E494 /* OnboardingSupport.swift */; };
@@ -40,6 +41,7 @@
 		4CF30A52F82837FBC69369B7 /* ProfileSetupFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03DFBC7601933D2488D79FE7 /* ProfileSetupFlowView.swift */; };
 		50957A9DEF3F9845847D0D82 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E9956064AA1C857C4FBDA79 /* AppConfig.swift */; };
 		535018F9F1C3600D23B758AD /* FriendProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C77AFE875ADF240F7229377C /* FriendProfileView.swift */; };
+		556ED4E977F5503E95AAE60A /* DataExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 569FA416F5F30884F5EC5F44 /* DataExportView.swift */; };
 		568FA9A7AF961FFF6DADAEAC /* SupabaseData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83C8BCA3AB25054EBBC8DA22 /* SupabaseData.swift */; };
 		595AB4D6989BD67403937AE5 /* ImageResizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11411E66F98A442A2933D5E /* ImageResizer.swift */; };
 		5AE254EE7D7B5CB5E0DAA51C /* JSONCoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BFFCC22748F6A4B20E5389E /* JSONCoding.swift */; };
@@ -156,6 +158,7 @@
 		4C49867E1056C19580C9661C /* FeedRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedRepositoryTests.swift; sourceTree = "<group>"; };
 		4E1EBF06157D81B3B210A5EF /* CryptoNonce.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptoNonce.swift; sourceTree = "<group>"; };
 		5397DFD01084A4E0BBA5A266 /* AuthSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSession.swift; sourceTree = "<group>"; };
+		569FA416F5F30884F5EC5F44 /* DataExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataExportView.swift; sourceTree = "<group>"; };
 		57A823DF518C2C34044FD7C6 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		62F18CEF001837B238A2C78C /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		683A6EF3431E9BC51B963C51 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
@@ -167,6 +170,7 @@
 		7E9956064AA1C857C4FBDA79 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		83C8BCA3AB25054EBBC8DA22 /* SupabaseData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseData.swift; sourceTree = "<group>"; };
 		8431B3781C6DDB129D65C967 /* DemoComposeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoComposeTests.swift; sourceTree = "<group>"; };
+		88B1AE6C6814A09B22738CFA /* DataExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataExportTests.swift; sourceTree = "<group>"; };
 		8E8C8934C61E9AA06217C902 /* DiaryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryRepository.swift; sourceTree = "<group>"; };
 		8EE6AEA2F988D4081AD90FA9 /* ReportContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportContentTests.swift; sourceTree = "<group>"; };
 		8F7E533FFB68AE0D607CE84E /* PostCommentsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostCommentsViewModelTests.swift; sourceTree = "<group>"; };
@@ -263,6 +267,7 @@
 			isa = PBXGroup;
 			children = (
 				28E880C268F01EA897CD5EFD /* BlockedUsersView.swift */,
+				569FA416F5F30884F5EC5F44 /* DataExportView.swift */,
 				992A7152E72932A1AD45B8E7 /* DeleteAccountView.swift */,
 				A28C4771ADDE62DBDEE18120 /* EditProfileView.swift */,
 				9FE2EBAF2631120634D10BD9 /* LegalDocumentView.swift */,
@@ -534,6 +539,7 @@
 				0B485E248E225AAA60C16019 /* AppSmokeTests.swift */,
 				0A25E072993F0DF9B435AF74 /* BeerCatalogTests.swift */,
 				A7D8490799C266AA018C6621 /* ComposePostTests.swift */,
+				88B1AE6C6814A09B22738CFA /* DataExportTests.swift */,
 				3790C1282D2C4B39809DB396 /* DeleteAccountWiringTests.swift */,
 				8431B3781C6DDB129D65C967 /* DemoComposeTests.swift */,
 				1872FAFB6961D5A9CADF105A /* FeedPagingTests.swift */,
@@ -737,6 +743,7 @@
 				F4EDDCADA7B3D1DAE9F8FB5E /* AppSmokeTests.swift in Sources */,
 				2EBA417F30678B235EC70817 /* BeerCatalogTests.swift in Sources */,
 				22A96A4B3D521BAE182953C5 /* ComposePostTests.swift in Sources */,
+				1AF4FBAB60E8D455411B5138 /* DataExportTests.swift in Sources */,
 				AC2CCC69E150D6A237283A4A /* DeleteAccountWiringTests.swift in Sources */,
 				3698D7635FFEB1217ED4FC8F /* DemoComposeTests.swift in Sources */,
 				EF477088B5EF2B3E9E798050 /* FeedPagingTests.swift in Sources */,
@@ -765,6 +772,7 @@
 				F3E2D020F54C7E1899BCA5A4 /* Components.swift in Sources */,
 				DDB557F36733B88A60411AFB /* ComposePostSheet.swift in Sources */,
 				16FEE497622C5F68DCC4A339 /* CryptoNonce.swift in Sources */,
+				556ED4E977F5503E95AAE60A /* DataExportView.swift in Sources */,
 				93DA601A08AFD9F06E357FE5 /* DeleteAccountView.swift in Sources */,
 				2F4CB2FBE90F249EE29E9366 /* DemoWorld.swift in Sources */,
 				78BA3290D2CF7943C44E2865 /* DiaryRepository.swift in Sources */,
