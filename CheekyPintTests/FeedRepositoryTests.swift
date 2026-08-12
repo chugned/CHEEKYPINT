@@ -58,4 +58,16 @@ final class FeedRepositoryTests: XCTestCase {
         let posts = try await repo.page(before: nil, limit: 20)
         XCTAssertFalse(posts.isEmpty, "demo mode must seed a feed so the offline demo works")
     }
+
+    func testPostImageURLUsesTheAuthenticatedObjectRoute() throws {
+        let config = AppConfig(environment: .development,
+                               supabaseURL: URL(string: "https://example.supabase.co")!,
+                               supabaseAnonKey: "k", universalHost: "example.invalid")
+        let repo = ProfileRepository(data: SupabaseData(config: config, auth: SupabaseAuth(config: config)))
+        let url = repo.postImageURL(for: "abc/def.jpg")
+        XCTAssertEqual(url?.absoluteString,
+                       "https://example.supabase.co/storage/v1/object/post-images/abc/def.jpg",
+                       "post photos are in a private bucket — the /object/public/ route returns 400")
+        XCTAssertNil(repo.postImageURL(for: nil))
+    }
 }

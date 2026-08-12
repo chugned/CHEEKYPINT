@@ -117,6 +117,17 @@ struct SupabaseData: Sendable {
         config.storageURL.appendingPathComponent("object/public/\(bucket)/\(path)")
     }
 
+    /// The authenticated URL for a stored object path — `/object/<bucket>/<path>` rather than
+    /// `/object/public/...`. Required for buckets whose `storage.objects` read policy is
+    /// evaluated per request (e.g. `post-images`, which is private and friend-aware per
+    /// `20260812000100_private_post_images.sql`): the public route returns 400 for those, because
+    /// there is no caller identity for the policy to check. `avatars` stays on `publicURL` above —
+    /// that bucket is still public-read. This asymmetry is deliberate and tracked, not an
+    /// oversight; hardening `avatars` similarly is known outstanding work.
+    func objectURL(bucket: String, path: String) -> URL {
+        config.storageURL.appendingPathComponent("object/\(bucket)/\(path)")
+    }
+
     // MARK: - Core request
 
     private func perform(method: String, url: URL, body: Data?, prefer: String? = nil) async throws -> Data {

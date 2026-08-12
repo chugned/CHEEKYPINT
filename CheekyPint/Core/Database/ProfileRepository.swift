@@ -124,6 +124,16 @@ struct ProfileRepository: Sendable {
         return data.publicURL(bucket: "avatars", path: path)
     }
 
+    /// Authenticated URL for a post-photo storage path (nil-safe). `post-images` is a private
+    /// bucket whose `storage.objects` read policy is evaluated per request, so — unlike
+    /// `avatarURL` above — this must go through the authenticated `/object/<bucket>/<path>` route
+    /// rather than `/object/public/...`, which cannot serve a private bucket. `avatars` remaining
+    /// public while `post-images` is private is deliberate and tracked, not an oversight.
+    func postImageURL(for path: String?) -> URL? {
+        guard let path else { return nil }
+        return data.objectURL(bucket: "post-images", path: path)
+    }
+
     private static let localAvatarPrefix = "local-avatar/"
 
     private static func writeLocalAvatar(_ jpeg: Data) throws -> String {

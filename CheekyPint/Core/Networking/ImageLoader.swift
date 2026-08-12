@@ -1,18 +1,17 @@
 import Foundation
 import UIKit
 
-/// Shared loader for the remote beer photography in the pint-logging catalog.
+/// Shared loader for images fetched from Supabase Storage (avatars, post photos).
 ///
-/// The catalog renders 98 cards from only 15 distinct Commons photos — one Pilsner shot backs 60
-/// of them. A plain `AsyncImage` per card therefore fired ~98 simultaneous requests for those 15
-/// files: `URLSession` does not coalesce identical in-flight requests, and because none had
-/// finished yet `URLCache` could not answer any of them either. Wikimedia rate-limits a burst
-/// like that outright (HTTP 429, "does not comply with our robot policy"), which is what made the
-/// row appear to load forever.
+/// The catalog renders many cards that can share the same underlying photo. A plain `AsyncImage`
+/// per card therefore fires one simultaneous request per card: `URLSession` does not coalesce
+/// identical in-flight requests, and because none had finished yet `URLCache` could not answer
+/// any of them either, so a shared photo could appear to load forever under a burst of duplicate
+/// requests.
 ///
-/// This collapses the burst to one request per distinct URL, keeps decoded images in memory so
-/// the 60 Pilsner cards decode that JPEG once rather than 60 times, and persists to disk so
-/// reopening the sheet is instant.
+/// This collapses the burst to one request per distinct URL, keeps decoded images in memory so a
+/// shared photo decodes once rather than once per card, and persists to disk so reopening the
+/// screen is instant.
 actor ImageLoader {
     static let shared = ImageLoader()
 
@@ -21,14 +20,22 @@ actor ImageLoader {
     /// One task per URL, so N cards sharing a photo await a single download.
     private var inFlight: [URL: Task<UIImage?, Never>] = [:]
 
+    /// Supplies the caller's current access token. Post photos live in a private bucket whose
+    /// read policy is evaluated per request, so every fetch must carry the caller's identity;
+    /// a static header cannot, because tokens refresh.
+    private var tokenProvider: (@Sendable () async -> String?)?
+
     init() {
         let configuration = URLSessionConfiguration.default
-        // Wikimedia blocks clients that do not identify themselves; a descriptive User-Agent with
-        // a contact URL is required by their robot policy.
+        // A descriptive User-Agent identifying the app and a contact URL is good manners for any
+        // backend, including the Supabase Storage endpoints this loader now fetches from.
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
         configuration.httpAdditionalHeaders = [
             "User-Agent": "CheekyPint/\(version) (https://cheekypint.app)"
         ]
+        // Named "BeerImages" from when this loader served Commons beer photography; left as-is
+        // since renaming would orphan users' existing on-disk caches for no benefit — the
+        // contents (Supabase Storage images) no longer match the name.
         configuration.urlCache = URLCache(memoryCapacity: 16 * 1024 * 1024,
                                           diskCapacity: 256 * 1024 * 1024,
                                           directory: URL.cachesDirectory.appending(path: "BeerImages"))
@@ -39,12 +46,25 @@ actor ImageLoader {
         decoded.countLimit = 40
     }
 
+    func setTokenProvider(_ provider: @escaping @Sendable () async -> String?) {
+        tokenProvider = provider
+    }
+
     func image(for url: URL) async -> UIImage? {
         if let cached = decoded.object(forKey: url as NSURL) { return cached }
         if let existing = inFlight[url] { return await existing.value }
 
+        // Read actor-isolated state (`tokenProvider`) before entering the detached task, and
+        // capture the resulting value rather than `self`. Reaching back into the actor from
+        // inside the task closure would force every fetch through an extra actor hop and could
+        // reintroduce the duplicate-request problem `inFlight` de-duplication exists to solve.
+        let tokenProvider = self.tokenProvider
         let task = Task<UIImage?, Never> { [session] in
-            guard let (data, response) = try? await session.data(from: url),
+            var request = URLRequest(url: url)
+            if let token = await tokenProvider?() {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
+            guard let (data, response) = try? await session.data(for: request),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let image = UIImage(data: data)
             else { return nil }

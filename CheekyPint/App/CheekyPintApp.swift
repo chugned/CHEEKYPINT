@@ -17,10 +17,23 @@ struct CheekyPintApp: App {
                 .environment(session)
                 .environment(\.container, container)
                 .tint(Theme.Palette.accent)
-                .task { await session.bootstrap() }
+                .task {
+                    await wireImageLoader()
+                    await session.bootstrap()
+                }
                 .onOpenURL { url in
                     Task { await handle(url) }
                 }
+        }
+    }
+
+    /// Post photos live in a private bucket whose read policy is evaluated per request, so every
+    /// fetch needs the caller's access token. Wire it into the shared `ImageLoader` once here,
+    /// before `bootstrap()` can put the app into a state where a feed renders, rather than
+    /// threading the provider through every view that shows a post photo.
+    private func wireImageLoader() async {
+        await ImageLoader.shared.setTokenProvider { [auth = container.auth] in
+            try? await auth.validAccessToken()
         }
     }
 
