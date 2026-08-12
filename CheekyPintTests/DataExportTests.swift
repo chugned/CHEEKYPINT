@@ -4,15 +4,21 @@ import XCTest
 /// DSGVO Art. 15 (access) / Art. 20 (portability) self-service export. `FeedRepository
 /// .exportMyData()` returns the server's raw, unparsed bytes; `DataExportView` must hand those
 /// exact bytes to the user (never a decoded/re-encoded copy — that would reorder keys and
-/// reformat numbers, so the file would no longer be what the server attested to) and must
-/// surface the `truncated` flag, because a silently partial export does not satisfy Art. 15 —
-/// the person cannot know what is missing.
+/// reformat numbers, so the file would no longer be what the server attested to), must surface
+/// the `truncated` flag honestly (including when it can't be determined at all — an unverifiable
+/// export must never be presented as a verified-complete one), and must not let a full
+/// personal-data export sit indefinitely in `tmp`.
 ///
 /// Every assertion here exercises a pure static helper on `DataExportView` directly (the same
 /// pattern `ComposePostSheet.canPost` / `.storagePath` use elsewhere in this suite), not the
 /// rendered view — this codebase has no view-inspection tooling, and these are the exact
 /// functions the view's body calls to decide what bytes to write and what to show.
 final class DataExportTests: XCTestCase {
+
+    override func tearDown() {
+        DataExportView.clearExportDirectory()
+        super.tearDown()
+    }
 
     // MARK: Byte-for-byte (no decode/re-encode)
 
@@ -29,9 +35,7 @@ final class DataExportTests: XCTestCase {
         let reencoded = try JSONSerialization.data(withJSONObject: JSONSerialization.jsonObject(with: raw))
         XCTAssertNotEqual(reencoded, raw, "fixture bug: this input must not already be canonical JSON")
 
-        let filename = "test-byte-for-byte-\(UUID().uuidString).json"
-        let url = try DataExportView.write(raw, filename: filename)
-        defer { try? FileManager.default.removeItem(at: url) }
+        let url = try DataExportView.write(raw, filename: "cheekypint-export-2026-08-12.json")
         let written = try Data(contentsOf: url)
 
         XCTAssertEqual(written, raw, "the exported file must be byte-for-byte identical to the server's bytes")
@@ -40,31 +44,79 @@ final class DataExportTests: XCTestCase {
                            "but must fail this exact-bytes comparison")
     }
 
-    // MARK: truncated flag → user-visible warning
+    // MARK: truncated flag → three distinguishable outcomes (complete / truncated / unverifiable)
 
     func testTruncatedTrueProducesAUserVisibleWarning() {
         let data = Data(#"{"exported_at":"2026-08-12T00:00:00Z","truncated":true}"#.utf8)
-        XCTAssertTrue(DataExportView.isTruncated(data))
+        XCTAssertEqual(DataExportView.truncationStatus(of: data), .truncated)
         XCTAssertNotNil(
-            DataExportView.warningMessage(forTruncated: DataExportView.isTruncated(data)),
+            DataExportView.warningMessage(for: DataExportView.truncationStatus(of: data)),
             "a truncated:true export must show the user a warning — Art. 15 access is not " +
             "satisfied by a silently partial file the person has no way to know is incomplete")
     }
 
     func testTruncatedFalseProducesNoWarning() {
         let data = Data(#"{"exported_at":"2026-08-12T00:00:00Z","truncated":false}"#.utf8)
-        XCTAssertFalse(DataExportView.isTruncated(data))
+        XCTAssertEqual(DataExportView.truncationStatus(of: data), .complete)
         XCTAssertNil(
-            DataExportView.warningMessage(forTruncated: DataExportView.isTruncated(data)),
-            "a complete (truncated:false) export must not show the truncation warning")
+            DataExportView.warningMessage(for: DataExportView.truncationStatus(of: data)),
+            "a complete (truncated:false) export must not show any warning")
     }
 
     /// Demo mode's stub is `{"demo":true}` — no `truncated` key at all. This must read as
-    /// "not truncated" rather than crash or (worse) mislead by defaulting to `true`.
-    func testMissingTruncatedKeyOnTheDemoStubIsTreatedAsNotTruncated() {
+    /// "complete" rather than crash or (worse) mislead by defaulting to truncated/unverifiable.
+    func testMissingTruncatedKeyOnTheDemoStubIsTreatedAsComplete() {
         let demoStub = Data(#"{"demo":true}"#.utf8)
-        XCTAssertFalse(DataExportView.isTruncated(demoStub), "a missing key must not crash or default to truncated")
-        XCTAssertNil(DataExportView.warningMessage(forTruncated: DataExportView.isTruncated(demoStub)))
+        XCTAssertEqual(DataExportView.truncationStatus(of: demoStub), .complete,
+                       "the legitimate demo-stub shape must not be treated as truncated or unverifiable")
+        XCTAssertNil(DataExportView.warningMessage(for: DataExportView.truncationStatus(of: demoStub)))
+    }
+
+    // MARK: Anomalous / unparseable shapes must never silently read as "complete"
+    //
+    // The previous implementation wrapped the whole decode in `try?` and collapsed every one of
+    // these into `false` ("not truncated") — a partial export with no warning, exactly the Art.
+    // 15 failure the flag exists to prevent. Each of the four inputs below is a distinct,
+    // concrete way that used to happen; each must now land on `.unverifiable`, never `.complete`.
+
+    func testTruncatedAsAStringIsUnverifiableNotCoerced() {
+        let data = Data(#"{"truncated":"true"}"#.utf8)
+        XCTAssertEqual(DataExportView.truncationStatus(of: data), .unverifiable,
+                       "a string value for truncated is anomalous for a documented boolean field — " +
+                       "this code must not guess whether \"true\" means true")
+    }
+
+    func testTruncatedAsANumberIsUnverifiableNotCoerced() {
+        let data = Data(#"{"truncated":1}"#.utf8)
+        XCTAssertEqual(DataExportView.truncationStatus(of: data), .unverifiable,
+                       "a numeric value for truncated is anomalous for a documented boolean field — " +
+                       "this code must not guess whether 1 means true")
+    }
+
+    func testTopLevelJSONArrayIsUnverifiable() {
+        let data = Data("[1,2,3]".utf8)
+        XCTAssertEqual(DataExportView.truncationStatus(of: data), .unverifiable,
+                       "a non-object top-level document cannot be read for a truncated flag at all")
+    }
+
+    func testMalformedBytesAreUnverifiable() {
+        let data = Data(#"{"truncated": tru"#.utf8) // deliberately cut off mid-token — invalid JSON
+        XCTAssertEqual(DataExportView.truncationStatus(of: data), .unverifiable,
+                       "malformed/partial bytes must never be silently read as a complete export")
+    }
+
+    /// The `.unverifiable` warning must exist (an unverifiable export must not be presented as
+    /// verified-complete) but must read as calm and honest, not alarming, and must not be the
+    /// same copy as the `.truncated` warning — they mean different things.
+    func testUnverifiableWarningIsPresentCalmAndDistinctFromTheTruncatedWarning() throws {
+        let unverifiable = try XCTUnwrap(DataExportView.warningMessage(for: .unverifiable),
+                                         "an unverifiable export must still warn — Art. 15 forbids " +
+                                         "presenting it as verified-complete")
+        let truncated = try XCTUnwrap(DataExportView.warningMessage(for: .truncated))
+        XCTAssertNotEqual(unverifiable, truncated, "the two warnings mean different things and must not share copy")
+        XCTAssertFalse(unverifiable.localizedCaseInsensitiveContains("corrupt"),
+                       "copy must stay calm/honest ('couldn't confirm this is complete'), not alarming " +
+                       "('your data is corrupted')")
     }
 
     // MARK: Filename — stable and dated
@@ -106,5 +158,45 @@ final class DataExportTests: XCTestCase {
         let message = DataExportView.errorMessage(for: SupabaseError.offline)
         XCTAssertEqual(message, SupabaseError.offline.friendlyMessage,
                        "non-rate-limit errors must not be swallowed by the rate-limit special case")
+    }
+
+    // MARK: Bounded on-disk lifetime — a full personal-data export must not accumulate in `tmp`
+
+    /// The concrete bug this fixes: export today, export again tomorrow (a different filename,
+    /// since the name is dated) — the previous implementation wrote loose into `tmp` by filename
+    /// alone, so both complete dumps of the person's data persisted side by side. A new export
+    /// must sweep any file left from a previous run, not add to it.
+    func testWriteSweepsAnyStaleFileFromAPreviousExportBeforeWritingTheNewOne() throws {
+        let stale = try DataExportView.write(Data("stale-export".utf8), filename: "cheekypint-export-2026-08-11.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stale.path), "sanity: the stale file must exist first")
+
+        let fresh = try DataExportView.write(Data("fresh-export".utf8), filename: "cheekypint-export-2026-08-12.json")
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path),
+                       "preparing a new export must sweep a stale file from a previous run/day, not " +
+                       "leave a second full personal-data dump sitting alongside it")
+    }
+
+    /// Models the "the view goes away" half of the fix — `DataExportView.onDisappear` calls
+    /// exactly this function.
+    func testClearExportDirectoryRemovesTheWrittenFile() throws {
+        let url = try DataExportView.write(Data("export-body".utf8), filename: "cheekypint-export-2026-08-12.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "sanity: the file must exist before removal")
+
+        DataExportView.clearExportDirectory()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path),
+                       "leaving the export screen must not leave a full personal-data export sitting in tmp")
+    }
+
+    /// `clearExportDirectory()` must not throw / must be a no-op when there is nothing to clear
+    /// (e.g. the very first launch, or calling it twice in a row) — the export screen calls it
+    /// unconditionally from `.onDisappear` whether or not an export ever ran.
+    func testClearExportDirectoryIsSafeToCallWhenNothingExists() {
+        DataExportView.clearExportDirectory()
+        DataExportView.clearExportDirectory()
+        // No crash, no thrown error reaching here — that is the assertion.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: DataExportView.exportDirectory.path))
     }
 }

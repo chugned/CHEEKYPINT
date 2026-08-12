@@ -6,12 +6,22 @@ import SwiftUI
 /// `FeedRepository.exportMyData()` deliberately returns the server's raw, unparsed bytes so the
 /// person receives exactly the document `export_my_data()` produced. This view must never decode
 /// and re-encode that JSON — a re-encode changes key order and numeric formatting, so the file
-/// would no longer be what the server attested to. It may only *read* the bytes (via
-/// `isTruncated(_:)`) to detect the `truncated` flag; the bytes handed to `ShareLink` are the
-/// exact bytes the repository returned, written straight to a temporary file.
+/// would no longer be what the server attested to. It may only *read* a copy of the bytes (via
+/// `truncationStatus(of:)`) to detect the `truncated` flag; the bytes handed to `ShareLink` are
+/// the exact bytes the repository returned, written straight to a temporary file.
 ///
 /// The document is never rendered on screen — this screen only explains what it contains and
-/// hands the file to the share sheet.
+/// hands the file to the share sheet. The file is written into a dedicated, wholly-disposable
+/// subdirectory of `tmp` (`exportDirectory`) rather than loose into `tmp` itself: every export
+/// this app can produce is a full personal-data dump (including the drink diary, which this
+/// project treats as health-adjacent), so its on-disk lifetime is bounded on both ends —
+/// `write(_:filename:)` sweeps that whole subdirectory before writing the new file (so a stale
+/// file from a previous day/run never just accumulates alongside the new one), and `.onDisappear`
+/// sweeps it again when this screen closes. SwiftUI's `ShareLink` has no completion callback in
+/// this SDK, so "once sharing finishes" can't be observed directly; bounding lifetime to "at most
+/// one file, only while this screen is open or an export is in flight" is the closest available
+/// approximation, and it fully closes the reported failure (today's export surviving into
+/// tomorrow's).
 struct DataExportView: View {
     @Environment(\.container) private var container
     @State private var isExporting = false
@@ -20,7 +30,22 @@ struct DataExportView: View {
 
     struct ExportResult: Equatable {
         let fileURL: URL
-        let truncated: Bool
+        let truncationStatus: TruncationStatus
+    }
+
+    /// Three outcomes, not two. Collapsing "decode failed" or "unexpected shape" into "not
+    /// truncated" (the previous, buggy behaviour) would silently present a partial or
+    /// unverifiable export as complete — precisely the Art. 15 failure the warning exists to
+    /// prevent.
+    enum TruncationStatus: Equatable {
+        /// Decoded successfully; `truncated` was absent (the legitimate demo-stub shape,
+        /// `{"demo":true}`) or present and `false`.
+        case complete
+        /// Decoded successfully; `truncated` was present and `true`.
+        case truncated
+        /// The document didn't decode as a JSON object, or `truncated` was present but not a
+        /// bool (e.g. the string `"true"` or the number `1`). Never claim completeness here.
+        case unverifiable
     }
 
     var body: some View {
@@ -43,11 +68,11 @@ struct DataExportView: View {
                 .font(Theme.Typography.body)
                 .foregroundStyle(Theme.Palette.textSecondary)
 
-                if let result, let warning = Self.warningMessage(forTruncated: result.truncated) {
+                if let result, let warning = Self.warningMessage(for: result.truncationStatus) {
                     Label(warning, systemImage: "exclamationmark.triangle.fill")
                         .font(Theme.Typography.callout)
                         .foregroundStyle(Theme.Palette.warning)
-                        .accessibilityIdentifier("data-export-truncated-warning")
+                        .accessibilityIdentifier("data-export-warning")
                 }
 
                 if let errorMessage {
@@ -82,6 +107,10 @@ struct DataExportView: View {
         .navigationTitle("Download my data")
         .navigationBarTitleDisplayMode(.inline)
         .overlay { if isExporting { ProgressView().tint(Theme.Palette.accent) } }
+        // The view going away is the one lifecycle signal SwiftUI actually gives us for "the
+        // person is done with this screen" — see the type doc for why this, not a ShareLink
+        // completion, is what bounds the file's lifetime on the "leaving" side.
+        .onDisappear { Self.clearExportDirectory() }
     }
 
     private func export() async {
@@ -92,7 +121,7 @@ struct DataExportView: View {
         do {
             let data = try await container.feed.exportMyData()
             let url = try Self.write(data, filename: Self.filename())
-            result = ExportResult(fileURL: url, truncated: Self.isTruncated(data))
+            result = ExportResult(fileURL: url, truncationStatus: Self.truncationStatus(of: data))
         } catch {
             errorMessage = Self.errorMessage(for: error)
         }
@@ -102,20 +131,57 @@ struct DataExportView: View {
     // exact functions rather than duplicating their logic inline, so a change that breaks the
     // behaviour they implement also breaks their tests.
 
-    /// Detects the server's `truncated` flag by decoding *only* that one key, never the full
-    /// document — this is a read for display purposes only and is never used to produce the
-    /// bytes written to disk. A missing key (e.g. demo mode's `{"demo":true}` stub) reads as
-    /// "not truncated" rather than crashing or defaulting to true.
-    static func isTruncated(_ data: Data) -> Bool {
-        struct Probe: Decodable { let truncated: Bool? }
-        return (try? SupabaseJSON.decoder.decode(Probe.self, from: data))?.truncated ?? false
+    /// Reads the server's `truncated` flag from a *copy* of the bytes via `JSONSerialization` —
+    /// never used to produce the bytes written to disk, and never routed through
+    /// `SupabaseJSON.decoder`'s `Codable` path, because a `Decodable` `Bool?` field fails the
+    /// whole decode (not just that field) when the key is present but the wrong shape, which
+    /// would make "present as a string" indistinguishable from "document unparseable" — exactly
+    /// the two cases this function must tell apart.
+    ///
+    /// `truncated` is documented as a `boolean` in the `export_my_data()` contract (`v_truncated
+    /// boolean`, `20260812000500_export_my_data.sql`). A value of the *wrong type* for that key
+    /// (a string, a number, ...) is therefore anomalous, not an alternate valid spelling of true
+    /// or false — coercing `"true"` or `1` into a guessed boolean would mean claiming knowledge
+    /// this code doesn't actually have, which is the same category of Art. 15 failure as staying
+    /// silent. Anomalous shapes are deliberately routed to `.unverifiable`, not guessed at.
+    /// Failing inputs this distinguishes: `"truncated":"true"` (string), `"truncated":1`
+    /// (number), a top-level JSON array, and malformed/partial bytes — all `.unverifiable`, none
+    /// of them silently `.complete`.
+    static func truncationStatus(of data: Data) -> TruncationStatus {
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return .unverifiable // decode failed, or the top level wasn't a JSON object
+        }
+        guard let flag = object["truncated"] else {
+            return .complete // key absent — the legitimate demo-stub shape, `{"demo":true}`
+        }
+        // `flag as? Bool` is NOT safe here: Foundation's `NSNumber`/`Bool` bridging treats a
+        // plain JSON number (e.g. `1`) as castable to `Bool` too, not only a genuine JSON
+        // `true`/`false` — confirmed against this runtime by `testTruncatedAsANumberIsUnverifiableNotCoerced`,
+        // which failed against a naive `as? Bool` cast during review. `CFBoolean` (what JSON
+        // `true`/`false` actually decodes to) is a distinct `CFTypeID` from `CFNumber` (what a
+        // JSON number decodes to), even though both toll-free-bridge to `NSNumber` — checking
+        // the underlying CF type is what actually tells them apart.
+        guard let number = flag as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
+            return .unverifiable // present but not a genuine JSON bool — anomalous; not coerced
+        }
+        return number.boolValue ? .truncated : .complete
     }
 
-    /// `nil` means "don't show a warning"; any other value is the exact copy to display.
-    static func warningMessage(forTruncated truncated: Bool) -> String? {
-        guard truncated else { return nil }
-        return "This export hit the 10,000-row cap in at least one section, so it's incomplete. " +
-               "Contact support if you need the rest of your data."
+    /// `nil` means "don't show a warning". The `.unverifiable` copy is deliberately calm — "we
+    /// couldn't confirm this is complete", not "your data is corrupted" — because most causes
+    /// (a transient decode hiccup) are not evidence anything is actually wrong, only that this
+    /// screen can't vouch for completeness the way it normally does.
+    static func warningMessage(for status: TruncationStatus) -> String? {
+        switch status {
+        case .complete:
+            return nil
+        case .truncated:
+            return "This export hit the 10,000-row cap in at least one section, so it's incomplete. " +
+                   "Contact support if you need the rest of your data."
+        case .unverifiable:
+            return "We couldn't confirm this file is complete. If anything looks missing, try " +
+                   "preparing your export again."
+        }
     }
 
     /// Maps a failed export to display copy. The RPC's own rate-limit hint
@@ -146,11 +212,32 @@ struct DataExportView: View {
         "cheekypint-export-\(filenameFormatter.string(from: date)).json"
     }
 
+    /// A dedicated, wholly-disposable subdirectory of `tmp` for exported documents — never write
+    /// this file loose into `tmp` itself. A full personal-data dump is sensitive enough (this
+    /// project already treats the drink diary as health-adjacent) that its on-disk footprint
+    /// must be a single, easily-swept location rather than a filename pattern callers have to
+    /// remember to match.
+    static var exportDirectory: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("data-export", isDirectory: true)
+    }
+
+    /// Removes the entire export subdirectory, if present. Called before every new export
+    /// (sweeping anything left over from a previous run/day — the concrete bug this fixes: export
+    /// today, export again tomorrow, and both files used to persist) and from `.onDisappear`
+    /// (bounding the file's lifetime to "while this screen is open"). Idempotent: a missing
+    /// directory is not an error.
+    static func clearExportDirectory() {
+        try? FileManager.default.removeItem(at: exportDirectory)
+    }
+
     /// Writes `data` verbatim — no decode, no re-encode — so the file on disk is byte-for-byte
-    /// what the repository returned.
+    /// what the repository returned. Always sweeps `exportDirectory` first, so at most one
+    /// exported document ever exists on disk at a time.
     @discardableResult
     static func write(_ data: Data, filename: String) throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        clearExportDirectory()
+        try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
+        let url = exportDirectory.appendingPathComponent(filename)
         try data.write(to: url, options: .atomic)
         return url
     }
