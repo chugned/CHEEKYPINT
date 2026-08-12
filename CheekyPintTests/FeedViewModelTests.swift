@@ -128,6 +128,84 @@ final class FeedViewModelTests: XCTestCase {
                        "a confirmed delete must subtract from the total (46 -> 45)")
     }
 
+    // MARK: - reload after composing
+
+    /// `reload()` (`ComposePostSheet.onPosted`) used to delegate straight to `refresh()`, whose
+    /// `guard !isLoading` returns immediately whenever any load is already in flight. That guard is
+    /// right for a pull-to-refresh — the user is holding the gesture and can pull again — and wrong
+    /// here: by the time this fires the composer has dismissed, the post exists server-side, and
+    /// there is no spinner, no error and nothing on screen to retry. The concrete sequence: scroll
+    /// to the bottom of the feed so `loadMore()` is in flight on a slow link, then compose and post
+    /// — the new post is simply absent until the user happens to pull to refresh.
+    ///
+    /// Driven deterministically, no sleeps: the injected `page` closure suspends the *second* call
+    /// (the `loadMore`) on a continuation, `reload()` is called while it is parked there, and only
+    /// then is the `loadMore` allowed to finish. The flip point: without `pendingReload`, the
+    /// reload is swallowed, no third page request is ever issued, and the new post never arrives.
+    func testReloadAfterComposingIsNotSwallowedByAnInFlightLoadMore() async throws {
+        let config = AppConfig(environment: .development,
+                               supabaseURL: URL(string: "https://unreachable.invalid")!,
+                               supabaseAnonKey: "k", universalHost: "unreachable.invalid")
+        let container = AppContainer(config: config)
+
+        func makePost(_ body: String, minutesAgo: Int) -> FeedPostDTO {
+            // Distinct, descending timestamps so the cursors differ per post, as the server's own
+            // keyset ordering guarantees.
+            let stamp = String(format: "2026-08-12T12:%02d:00.000Z", 59 - minutesAgo)
+            return FeedPostDTO(postId: UUID(), authorId: UUID(), displayName: "Barnaby",
+                               avatarPath: nil, body: body, imagePath: nil, placeLabel: nil,
+                               pubId: nil, createdAtRaw: stamp, cheersCount: 0,
+                               viewerHasCheered: false, commentCount: 0)
+        }
+        let p1 = makePost("page one, first", minutesAgo: 0)
+        let p2 = makePost("page one, second", minutesAgo: 1)
+        let p3 = makePost("page two", minutesAgo: 2)
+        let justComposed = makePost("the post the user just wrote", minutesAgo: -1)
+
+        var receivedCursors: [FeedCursor?] = []
+        var resumeLoadMore: CheckedContinuation<[FeedPostDTO], Never>?
+
+        let model = FeedViewModel(container: container, pageSize: 2, page: { cursor, _ in
+            receivedCursors.append(cursor)
+            switch receivedCursors.count {
+            case 1:
+                return [p1, p2] // a full page, so hasMore is true and loadMore is reachable
+            case 2:
+                // The loadMore: park here until the test lets it finish, so `reload()` below runs
+                // while `isLoading` is genuinely true.
+                return await withCheckedContinuation { resumeLoadMore = $0 }
+            default:
+                // Page one again, now including the composed post at the head — what the server
+                // returns once `create_post` has committed.
+                return [justComposed, p1, p2]
+            }
+        })
+
+        await model.load()
+        XCTAssertTrue(model.hasMore, "sanity: a full first page must leave loadMore reachable")
+
+        let loadMoreTask = Task { await model.loadMore() }
+        while resumeLoadMore == nil { await Task.yield() }
+
+        await model.reload()
+
+        XCTAssertEqual(receivedCursors.count, 2,
+                       "sanity: while the loadMore is parked, the reload cannot have fetched yet")
+        XCTAssertFalse(model.posts.contains { $0.id == justComposed.postId },
+                       "sanity: nothing has arrived yet")
+
+        resumeLoadMore?.resume(returning: [p3])
+        await loadMoreTask.value
+
+        XCTAssertEqual(receivedCursors.count, 3,
+                       "the post-compose reload must actually re-fetch page one once the in-flight " +
+                       "loadMore releases isLoading — not be dropped by refresh()'s guard")
+        XCTAssertNil(receivedCursors.last!,
+                     "the deferred reload must fetch page one (a nil cursor), not resume paging")
+        XCTAssertEqual(model.posts.first?.id, justComposed.postId,
+                       "the post the user just composed must appear at the head of the feed")
+    }
+
     // MARK: - deletePost
 
     /// The concrete regression this guards against: if `deletePost` forgot to remove the post from

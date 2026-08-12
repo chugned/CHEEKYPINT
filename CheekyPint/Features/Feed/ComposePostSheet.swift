@@ -77,7 +77,14 @@ struct ComposePostSheet: View {
         NavigationStack {
             Form {
                 if let errorMessage {
-                    Text(errorMessage).foregroundStyle(Theme.Palette.warning)
+                    // Matched to its four siblings — `comments-send-error`, `report-content-error`,
+                    // `data-export-error`, `report-user-error` — all of which carry a
+                    // `Theme.Typography` token and an identifier. This was the only one with
+                    // neither, so it was both visually inconsistent and unreachable from a UI test.
+                    Text(errorMessage)
+                        .font(Theme.Typography.callout)
+                        .foregroundStyle(Theme.Palette.warning)
+                        .accessibilityIdentifier("compose-post-error")
                 }
                 bodySection
                 photoSection

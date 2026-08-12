@@ -104,6 +104,22 @@ final class FeedViewModel {
     /// because nothing here ever needs to forget a delete before the process restarts anyway.
     private var deletedPostIDs: Set<UUID> = []
 
+    /// A `reload()` that arrived while another load was in flight and must not be lost.
+    ///
+    /// `reload()` delegates to the same page-one fetch as `refresh()`, and that fetch is guarded by
+    /// `isLoading` — the flag that makes `refresh()` and `loadMore()` mutually exclusive (see
+    /// `refresh()`'s doc for the `p21...p40` drop it was added to fix). Dropping the request is the
+    /// right answer for a pull-to-refresh, because the user is holding the gesture and can simply
+    /// pull again. It is the wrong answer for a post-compose reload: by then the composer has
+    /// dismissed, the post exists server-side, and there is no spinner, no error and nothing on
+    /// screen to retry. Concretely — scroll to the bottom of the feed so `loadMore()` is in flight
+    /// on a slow connection, then compose and post: the new post is simply absent until the user
+    /// happens to pull to refresh.
+    ///
+    /// A `Bool` rather than a counter on purpose: N reloads that arrive during one in-flight load
+    /// collapse into one page-one fetch, which surfaces all of them.
+    private var pendingReload = false
+
     init(container: AppContainer, pageSize: Int = 20,
          toggleCheers: ((UUID) async throws -> ToggleCheersDTO)? = nil,
          page: ((FeedCursor?, Int) async throws -> [FeedPostDTO])? = nil,
@@ -118,7 +134,17 @@ final class FeedViewModel {
     /// First load. Clears any existing posts up front so a retry after an error doesn't show
     /// stale content next to the error state. Guarded by the same `isLoading` flag as `refresh()`
     /// and `loadMore()` (see the note there) so this can't race either of them.
+    ///
+    /// Each of the three public load entry points is a thin `perform…` + `drainPendingReload()`
+    /// pair. The split exists so the `isLoading` flag can be released by `defer` inside the
+    /// `perform…` body (which is what makes it exception-safe) *before* the drain runs — a drain
+    /// inside that scope would see `isLoading` still true and skip itself.
     func load() async {
+        await performLoad()
+        await drainPendingReload()
+    }
+
+    private func performLoad() async {
         guard !isLoading else { return }
         isLoading = true
         loadError = nil
@@ -137,6 +163,11 @@ final class FeedViewModel {
     /// `p41...p60` on top of that, silently dropping `p21...p40`. One shared flag makes `refresh`
     /// and `loadMore` mutually exclusive instead of two independent writers to the same array.
     func refresh() async {
+        await performRefresh()
+        await drainPendingReload()
+    }
+
+    private func performRefresh() async {
         guard !isLoading else { return }
         isLoading = true
         loadError = nil
@@ -148,8 +179,29 @@ final class FeedViewModel {
     /// sorts to the head of the feed by `created_at`, so re-fetching page one — the same fetch
     /// `refresh()` already does for pull-to-refresh — is enough to surface it, with no separate
     /// "prepend one post locally" path that could drift from the server's own ordering/dedup.
+    ///
+    /// Unlike `refresh()` this must not be silently dropped when a load is already in flight: see
+    /// `pendingReload`'s doc. If one is, the request is recorded and run by whichever load is
+    /// holding `isLoading`, as soon as it releases it.
     func reload() async {
-        await refresh()
+        guard !isLoading else {
+            pendingReload = true
+            return
+        }
+        await performRefresh()
+        await drainPendingReload()
+    }
+
+    /// Runs a `reload()` that `pendingReload` recorded, once nothing else is loading.
+    ///
+    /// A `while` rather than an `if`: the fetch below suspends, so another `reload()` can arrive
+    /// during it and set the flag again. This cannot spin — the condition only becomes true again
+    /// when an external caller sets it, never as a side effect of the loop body.
+    private func drainPendingReload() async {
+        while pendingReload, !isLoading {
+            pendingReload = false
+            await performRefresh()
+        }
     }
 
     private func fetchFirstPage() async {
@@ -177,6 +229,11 @@ final class FeedViewModel {
     /// sends an incomplete cursor (see the SQL migration's own note), and that failure mode is
     /// only "recoverable client-side" if the client actually dedupes — it didn't.
     func loadMore() async {
+        await performLoadMore()
+        await drainPendingReload()
+    }
+
+    private func performLoadMore() async {
         guard !isLoading, hasMore, let cursor = posts.last?.cursor else { return }
         isLoading = true
         defer { isLoading = false }
