@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0591410BF9C29355D7EC7749 /* SupabaseErrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C83EBC7CEE06E1925FE50CD /* SupabaseErrorTests.swift */; };
 		05DD49325639188D92C63F8E /* FeedViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7632253847C92DD56B89FD0 /* FeedViewModel.swift */; };
 		0B9B73CFD859100B04133E70 /* OnboardingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABC3041556D23C7B3E1BFCE4 /* OnboardingUITests.swift */; };
 		0C65BAA383954F7F629CB3DA /* Lobster-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CF703E6D3C36825335B43C17 /* Lobster-Regular.ttf */; };
@@ -133,6 +134,7 @@
 		0B485E248E225AAA60C16019 /* AppSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSmokeTests.swift; sourceTree = "<group>"; };
 		0BFFCC22748F6A4B20E5389E /* JSONCoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONCoding.swift; sourceTree = "<group>"; };
 		0C159334B37CFC7DAA096E37 /* HomeComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeComponents.swift; sourceTree = "<group>"; };
+		0C83EBC7CEE06E1925FE50CD /* SupabaseErrorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseErrorTests.swift; sourceTree = "<group>"; };
 		0F90FE5789EFAAB44E55D781 /* PersonalHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalHistoryView.swift; sourceTree = "<group>"; };
 		10FB87EB91062CB8BCF9088F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		1872FAFB6961D5A9CADF105A /* FeedPagingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedPagingTests.swift; sourceTree = "<group>"; };
@@ -550,6 +552,7 @@
 				FB8CDFDA9CF178CBFD8B078D /* PostCommentsSheetTests.swift */,
 				8F7E533FFB68AE0D607CE84E /* PostCommentsViewModelTests.swift */,
 				8EE6AEA2F988D4081AD90FA9 /* ReportContentTests.swift */,
+				0C83EBC7CEE06E1925FE50CD /* SupabaseErrorTests.swift */,
 			);
 			path = CheekyPintTests;
 			sourceTree = "<group>";
@@ -754,6 +757,7 @@
 				A43356911DE15515290CCC1E /* PostCommentsSheetTests.swift in Sources */,
 				A50ABB43266BF70A73F1CD61 /* PostCommentsViewModelTests.swift in Sources */,
 				8DAE93C1692BBD1C101E1255 /* ReportContentTests.swift in Sources */,
+				0591410BF9C29355D7EC7749 /* SupabaseErrorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

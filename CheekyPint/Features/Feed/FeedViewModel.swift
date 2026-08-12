@@ -86,6 +86,24 @@ final class FeedViewModel {
     /// ignored rather than firing a duplicate `delete_post` — same reasoning as `cheersInFlight`.
     private var deletingPostIDs: Set<UUID> = []
 
+    /// Ids the viewer has successfully deleted this session. Closes a race between `deletePost`
+    /// and `refresh()`: `refresh()`'s `fetchFirstPage()` replaces `posts` wholesale from a fresh
+    /// `feed_page` read, and if that read is issued *before* `delete_post`'s `UPDATE ...
+    /// deleted_at` commits but its response is processed *after* `deletePost`'s own `removeAll`,
+    /// the "deleted" post is written straight back into `posts` — silently contradicting
+    /// `FeedPostCard`'s "This can't be undone" confirmation. `fetchFirstPage()` filters this set
+    /// out of every page it assigns, including a plain `load()`, so a resurrected row can never
+    /// stick even if it briefly reappears in a server response mid-race.
+    ///
+    /// `loadMore()`'s `appendDeduplicated` path deliberately does **not** consult this set: its
+    /// cursor is always strictly older than the last row already shown, so an already-visible
+    /// deleted post can never re-enter through it — the race is specific to a full replace.
+    ///
+    /// Bounded by how many posts this viewer deletes before the app process ends, not by feed
+    /// size — for the handful of deletes a real session sees, that's noise; there's no eviction
+    /// because nothing here ever needs to forget a delete before the process restarts anyway.
+    private var deletedPostIDs: Set<UUID> = []
+
     init(container: AppContainer, pageSize: Int = 20,
          toggleCheers: ((UUID) async throws -> ToggleCheersDTO)? = nil,
          page: ((FeedCursor?, Int) async throws -> [FeedPostDTO])? = nil,
@@ -137,7 +155,8 @@ final class FeedViewModel {
     private func fetchFirstPage() async {
         do {
             let page = try await pageRequest(nil, pageSize)
-            posts = page.map(FeedPostState.init)
+            // Filter before assigning — see `deletedPostIDs`'s doc for the exact race this closes.
+            posts = page.filter { !deletedPostIDs.contains($0.postId) }.map(FeedPostState.init)
             hasMore = page.count == pageSize
         } catch let cancellation where cancellation.isCancellation {
             // Switching tabs cancels this screen's `.task` mid-fetch (see `FeedView`). That's an
@@ -250,6 +269,7 @@ final class FeedViewModel {
         defer { deletingPostIDs.remove(post.id) }
         do {
             try await deletePostRequest(post.id)
+            deletedPostIDs.insert(post.id)
             posts.removeAll { $0.id == post.id }
         } catch let error as SupabaseError {
             deleteError = error.friendlyMessage

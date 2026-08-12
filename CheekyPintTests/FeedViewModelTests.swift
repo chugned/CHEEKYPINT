@@ -189,4 +189,80 @@ final class FeedViewModelTests: XCTestCase {
         XCTAssertEqual(model.posts.map(\.id), [postID], "a failed delete must not remove the post")
         XCTAssertNotNil(model.deleteError, "a failed delete must surface an error")
     }
+
+    /// Code review's Important finding: `deletePost` and `refresh()` don't know about each other.
+    /// `refresh()`'s `fetchFirstPage()` replaces `posts` wholesale from a fresh `feed_page` read —
+    /// if that read is issued *before* `delete_post`'s `UPDATE ... deleted_at` commits, but its
+    /// response is processed *after* `deletePost`'s own `removeAll`, the "deleted" post is written
+    /// straight back into `posts`, silently contradicting the confirmation dialog's "This can't be
+    /// undone."
+    ///
+    /// This drives that exact interleaving deterministically (no sleeps): the injected `page`
+    /// closure suspends the *second* call (the refresh) on a `CheckedContinuation` until the test
+    /// explicitly resumes it, so the delete's `removeAll` is guaranteed to run and complete first,
+    /// and only then does the refresh's stale page — which still contains the "deleted" post,
+    /// exactly as a `feed_page` read issued before `delete_post` committed would — get delivered.
+    /// The flip point: without `deletedPostIDs` filtering `fetchFirstPage()`'s result, this stale
+    /// page reinstates the deleted post and the final assertion fails.
+    func testRefreshCannotResurrectAPostDeletedWhileItsPageRequestWasInFlight() async throws {
+        let config = AppConfig(environment: .development,
+                               supabaseURL: URL(string: "https://unreachable.invalid")!,
+                               supabaseAnonKey: "k", universalHost: "unreachable.invalid")
+        let container = AppContainer(config: config)
+
+        func makePost(_ id: UUID, body: String) -> FeedPostDTO {
+            FeedPostDTO(postId: id, authorId: UUID(), displayName: "Barnaby", avatarPath: nil,
+                       body: body, imagePath: nil, placeLabel: nil, pubId: nil,
+                       createdAtRaw: "2026-08-12T12:00:00.000Z", cheersCount: 0,
+                       viewerHasCheered: false, commentCount: 0)
+        }
+        let toDelete = makePost(UUID(), body: "delete me")
+        let other = makePost(UUID(), body: "stays")
+        let page = [toDelete, other]
+
+        var pageRequestCallCount = 0
+        // Set by the second `pageRequest` call (the refresh) once it's suspended, waiting for the
+        // test to let its "stale" response through. Both this and `pageRequestCallCount` above are
+        // plain captured locals — the injected closure is MainActor-isolated (inferred from this
+        // `@MainActor` test method), matching every other seam closure in this file
+        // (`testConcurrentCheersTapsOnTheSamePostIgnoreTheSecondWhileOneIsOutstanding`'s
+        // `callCount`, for instance) — so there is no cross-actor mutation here despite the
+        // `async` suspension in between.
+        var resumeStaleRefresh: CheckedContinuation<[FeedPostDTO], Never>?
+
+        let model = FeedViewModel(
+            container: container,
+            page: { _, _ in
+                pageRequestCallCount += 1
+                if pageRequestCallCount == 1 { return page } // the initial load
+                // The refresh: block here until the test resumes it, after the delete below has
+                // already completed and removed the post locally.
+                return await withCheckedContinuation { continuation in
+                    resumeStaleRefresh = continuation
+                }
+            },
+            deletePost: { _ in }
+        )
+
+        await model.load()
+        XCTAssertEqual(Set(model.posts.map(\.id)), Set([toDelete.postId, other.postId]))
+
+        let refreshTask = Task { await model.refresh() }
+        // Deterministic, not timing-based: yield until the refresh's `pageRequest` call has
+        // actually reached and suspended on the continuation above.
+        while resumeStaleRefresh == nil { await Task.yield() }
+
+        await model.deletePost(model.posts.first { $0.id == toDelete.postId }!)
+        XCTAssertFalse(model.posts.contains { $0.id == toDelete.postId },
+                       "the delete must remove the post locally before the stale refresh resolves")
+
+        // Only now does the refresh's page — still containing the "deleted" post — arrive.
+        resumeStaleRefresh?.resume(returning: page)
+        await refreshTask.value
+
+        XCTAssertFalse(model.posts.contains { $0.id == toDelete.postId },
+                       "a stale refresh page containing an already-deleted post must not resurrect it")
+        XCTAssertTrue(model.posts.contains { $0.id == other.postId },
+                      "an unrelated post in the same stale page must still load normally")
+    }
 }
