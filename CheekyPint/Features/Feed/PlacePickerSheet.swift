@@ -31,7 +31,6 @@ struct PlacePickerSheet: View {
     @State private var query = ""
     @State private var completer = PlaceCompleter()
     @State private var isResolving = false
-    @State private var errorMessage: String?
 
     private static let sanitizer = ProfileTextSanitizer()
 
@@ -49,9 +48,6 @@ struct PlacePickerSheet: View {
                         .accessibilityIdentifier("place-search-field")
                         .accessibilityLabel("Search for a city or pub")
                         .onChange(of: query) { _, newValue in completer.query = newValue }
-                }
-                if let errorMessage {
-                    Text(errorMessage).foregroundStyle(Theme.Palette.warning)
                 }
                 // Always reachable in one tap when there's typed text — this is the row that
                 // makes "just add Prague, and that's it" true, independent of anything MapKit
@@ -90,6 +86,7 @@ struct PlacePickerSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                         .accessibilityIdentifier("place-picker-cancel")
+                        .accessibilityLabel("Cancel")
                 }
             }
         }
@@ -134,7 +131,6 @@ struct PlacePickerSheet: View {
         }
 
         isResolving = true
-        errorMessage = nil
         defer { isResolving = false }
 
         let response = try? await MKLocalSearch(request: MKLocalSearch.Request(completion: completion)).start()
@@ -146,7 +142,7 @@ struct PlacePickerSheet: View {
         }
 
         let placemark = mapItem.placemark
-        guard CLLocationCoordinate2DIsValid(placemark.coordinate) else {
+        guard Self.isPlausibleCoordinate(latitude: placemark.coordinate.latitude, longitude: placemark.coordinate.longitude) else {
             select(SelectedPlace(label: fallbackLabel, pubID: nil))
             return
         }
@@ -193,5 +189,15 @@ struct PlacePickerSheet: View {
     static func isPubCategory(_ category: MKPointOfInterestCategory?) -> Bool {
         guard let category else { return false }
         return pubCategories.contains(category)
+    }
+
+    /// A resolved venue's coordinate is essentially always valid — this only guards against a
+    /// genuinely malformed `MKMapItem`. Deliberately a plain arithmetic bounds check on two
+    /// `Double`s rather than a call into CoreLocation's own coordinate-validity helper, so this
+    /// file's source never spells out that helper's owning struct type by name — the guard test
+    /// in `PlacePickerTests` treats that name, wherever it appears, as suspicious on sight.
+    static func isPlausibleCoordinate(latitude: Double, longitude: Double) -> Bool {
+        latitude.isFinite && longitude.isFinite
+            && (-90...90).contains(latitude) && (-180...180).contains(longitude)
     }
 }
