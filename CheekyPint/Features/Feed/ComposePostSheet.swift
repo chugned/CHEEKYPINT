@@ -24,8 +24,19 @@ struct ComposePostSheet: View {
     /// characters blocks submission" is testable without a view instance — disabling Post past
     /// `bodyLimit` rather than letting the server's `left(v_body, 500)` clamp silently drop the
     /// tail of what the user typed.
+    ///
+    /// Measured with `bodyLength(of:)`, not `body.count`: `left(v_body, 500)` counts code points,
+    /// and gating on grapheme clusters would re-open the exact silent truncation this guard
+    /// exists to prevent (see `ProfileTextSanitizer`'s own doc for the NFD/flag/variation-selector
+    /// cases). For pure ASCII the two are identical.
     static func canSubmit(body: String, hasPhoto: Bool) -> Bool {
-        canPost(body: body, hasPhoto: hasPhoto) && body.count <= bodyLimit
+        canPost(body: body, hasPhoto: hasPhoto) && bodyLength(of: body) <= bodyLimit
+    }
+
+    /// The number the counter shows and `canSubmit` gates on: how long this body will be **once
+    /// stored**, in the server's own unit. See `ProfileTextSanitizer.sanitizedLength`.
+    static func bodyLength(of body: String) -> Int {
+        sanitizer.sanitizedLength(body, allowNewlines: true)
     }
 
     /// `<uid>/<uuid>.jpg` — `create_post` checks the first folder segment against
@@ -58,7 +69,9 @@ struct ComposePostSheet: View {
     @State private var selectedPlace: SelectedPlace?
     @State private var showingPlacePicker = false
 
-    private let sanitizer = ProfileTextSanitizer()
+    /// `static` so `canSubmit`/`bodyLength` — the pure, directly-tested gate — can share the one
+    /// instance the view's own `submit()` uses, rather than each measuring with a different tool.
+    private static let sanitizer = ProfileTextSanitizer()
 
     var body: some View {
         NavigationStack {
@@ -102,9 +115,11 @@ struct ComposePostSheet: View {
                 .accessibilityLabel("Post text")
             HStack {
                 Spacer(minLength: 0)
-                Text("\(postBody.count)/\(Self.bodyLimit)")
+                Text("\(bodyLength)/\(Self.bodyLimit)")
                     .font(Theme.Typography.caption)
                     .foregroundStyle(isOverLimit ? Theme.Palette.warning : Theme.Palette.textSecondary)
+                    .accessibilityIdentifier("compose-post-counter")
+                    .accessibilityLabel("\(bodyLength) of \(Self.bodyLimit) characters used")
             }
         }
     }
@@ -176,7 +191,11 @@ struct ComposePostSheet: View {
 
     // MARK: - Derived state
 
-    private var isOverLimit: Bool { postBody.count > Self.bodyLimit }
+    /// Both read through `Self.bodyLength` so what the counter shows and what Post gates on are
+    /// the same number, measured the same way the server will measure it.
+    private var bodyLength: Int { Self.bodyLength(of: postBody) }
+
+    private var isOverLimit: Bool { bodyLength > Self.bodyLimit }
 
     private var canSubmit: Bool {
         Self.canSubmit(body: postBody, hasPhoto: photoJPEG != nil)
@@ -203,7 +222,7 @@ struct ComposePostSheet: View {
         errorMessage = nil
         defer { isPosting = false }
 
-        let cleanBody = sanitizer.sanitize(postBody, allowNewlines: true, maxLength: Self.bodyLimit)
+        let cleanBody = Self.sanitizer.sanitize(postBody, allowNewlines: true, maxLength: Self.bodyLimit)
         guard Self.canPost(body: cleanBody, hasPhoto: photoJPEG != nil) else {
             errorMessage = "A post needs a photo or a few words."
             return

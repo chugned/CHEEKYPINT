@@ -149,8 +149,12 @@ final class PostCommentsViewModelTests: XCTestCase {
             onCommentCountChanged: { _ in },
             comments: { _, _, _ in [] },
             addComment: { _, body, mentions in
-                XCTAssertEqual(body.count, PostCommentsViewModel.bodyLimit,
-                               "the body actually sent must still respect the server's clamp")
+                // 280 as a literal, not `PostCommentsViewModel.bodyLimit`: the constant exists
+                // solely to mirror `add_comment`'s `left(v_body, 280)`, so asserting against it
+                // would keep this green if someone set it to 99 and desynchronised the two.
+                XCTAssertEqual(body.unicodeScalars.count, 280,
+                               "the body actually sent must still respect the server's clamp, " +
+                               "measured in the code points left(v_body, 280) counts")
                 sentMentions = mentions
                 return UUID()
             }

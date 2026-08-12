@@ -54,23 +54,54 @@ final class ComposePostTests: XCTestCase {
     /// constants against themselves). A body one character past the limit must actually disable
     /// Post — the server truncates silently, and a user who wrote 501 characters should not
     /// discover the last character vanished after posting.
+    ///
+    /// **500 is a literal here, and the input is built from that literal, not from
+    /// `ComposePostSheet.bodyLimit`.** Deriving both sides from the constant made this test pass
+    /// for any value of it — including 5000, which would desynchronise the client from
+    /// `create_post`'s `left(v_body, 500)` and reintroduce silent truncation. The constant exists
+    /// only to mirror that SQL, so the SQL's number is what this test has to pin.
     func testBodyOverTheLimitBlocksSubmission() {
-        let atLimit = String(repeating: "a", count: ComposePostSheet.bodyLimit)
-        let overLimit = atLimit + "x"
+        XCTAssertEqual(ComposePostSheet.bodyLimit, 500,
+                       "must mirror create_post's left(v_body, 500) — a literal, so changing the " +
+                       "constant fails here rather than silently redefining the limit")
+
+        let atLimit = String(repeating: "a", count: 500)
         XCTAssertTrue(ComposePostSheet.canSubmit(body: atLimit, hasPhoto: false),
-                      "exactly the limit must still be postable")
-        XCTAssertFalse(ComposePostSheet.canSubmit(body: overLimit, hasPhoto: false),
+                      "exactly 500 must still be postable")
+        XCTAssertFalse(ComposePostSheet.canSubmit(body: atLimit + "x", hasPhoto: false),
                        "501 characters must block Post, not silently truncate on send")
     }
 
-    /// Behavioural replacement for the place-label half of the same old test: an 81-character
-    /// label must actually come back at 80 through the sanitizer call `ComposePostSheet` uses
-    /// (Task 3 wires the input; the limit and the sanitize call are already load-bearing here).
-    func testPlaceLabelOverTheLimitIsClampedTo80() {
-        let sanitizer = ProfileTextSanitizer()
-        let overLimit = String(repeating: "b", count: ComposePostSheet.placeLabelLimit + 1)
-        let clamped = sanitizer.sanitize(overLimit, allowNewlines: false, maxLength: ComposePostSheet.placeLabelLimit)
-        XCTAssertEqual(clamped.count, ComposePostSheet.placeLabelLimit,
-                       "an 81-character place label must be clamped to 80, mirroring create_post's left(v_label, 80)")
+    /// The place-label limit is pinned behaviourally by `PlacePickerTests`
+    /// `testLabelIsClampedToTheServerLimit`, which drives `PlacePickerSheet.freeTextPlace` — the
+    /// only consumer of `placeLabelLimit` — with a 200-character label and requires 80 back. The
+    /// literal here is the other half of that: it pins the constant to the SQL it mirrors, whereas
+    /// the removed `testPlaceLabelOverTheLimitIsClampedTo80` called `ProfileTextSanitizer` directly
+    /// with a limit taken from the constant, so it exercised no `ComposePostSheet` code at all and
+    /// stayed green for any value of the constant.
+    func testPlaceLabelLimitMirrorsTheServerClamp() {
+        XCTAssertEqual(ComposePostSheet.placeLabelLimit, 80,
+                       "must mirror create_post's left(v_label, 80)")
+    }
+
+    /// `canSubmit` gates on the code-point length the server will measure, not the grapheme-cluster
+    /// count `String.count` reports. 300 NFD-decomposed characters — what pasting accented text
+    /// from macOS produces — is 600 code points, so `left(v_body, 500)` would cut 100 of them; the
+    /// counter said "300/500" and Post was enabled. Both must now refuse.
+    func testCounterAndGateMeasureCodePointsSoNFDTextCannotOverrunTheServerLimit() {
+        let nfd = String(repeating: "a\u{0308}", count: 300)
+        XCTAssertEqual(nfd.count, 300, "fixture: 300 user-visible characters")
+
+        XCTAssertEqual(ComposePostSheet.bodyLength(of: nfd), 600,
+                       "the counter must show the stored code-point length, not the 300 typed")
+        XCTAssertFalse(ComposePostSheet.canSubmit(body: nfd, hasPhoto: false),
+                       "600 code points exceeds 500, so Post must be blocked rather than letting " +
+                       "the server drop 100 of them")
+
+        // The boundary in the server's own unit: 250 clusters is exactly 500 code points and must
+        // still be postable, so the gate is not merely rejecting all multi-scalar text.
+        XCTAssertTrue(ComposePostSheet.canSubmit(body: String(repeating: "a\u{0308}", count: 250),
+                                                 hasPhoto: false),
+                      "exactly 500 code points must still be postable")
     }
 }

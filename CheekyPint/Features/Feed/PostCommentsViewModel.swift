@@ -183,9 +183,14 @@ final class PostCommentsViewModel {
         // the trimmed length exceeds `maxLength`, so this is the full, untruncated cleaned text.
         let uncappedBody = Self.sanitizer.sanitize(rawBody, allowNewlines: true, maxLength: .max)
         guard !uncappedBody.isEmpty else { return false }
-        // Mirrors `ProfileTextSanitizer.clean`'s own final step: trim after the length clamp too,
-        // in case the cut lands right after a space.
-        let cleanBody = String(uncappedBody.prefix(Self.bodyLimit)).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Clamped by the sanitizer rather than `String.prefix`: `left(v_body, 280)` counts code
+        // points, and `prefix` counts grapheme clusters, so a `prefix(280)` of NFD or flag text is
+        // up to twice the server's budget and gets cut again server-side. Re-running the sanitizer
+        // on already-clean text is a no-op apart from that clamp (step 1 and 2 are idempotent), so
+        // this is the clamp the whole app measures with, not a second implementation of it.
+        // `PostCommentsSheet.canSend` normally keeps this from truncating at all; it stays as the
+        // last line of defence for any non-UI caller.
+        let cleanBody = Self.sanitizer.sanitize(uncappedBody, allowNewlines: true, maxLength: Self.bodyLimit)
         guard !cleanBody.isEmpty else { return false }
 
         isSending = true

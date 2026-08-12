@@ -13,11 +13,32 @@ final class PlacePickerTests: XCTestCase {
         XCTAssertNil(PlacePickerSheet.freeTextPlace(from: "   "), "whitespace is not a place")
     }
 
+    /// The only behavioural owner of the 80-character place-label clamp: `freeTextPlace` is the
+    /// sole consumer of `ComposePostSheet.placeLabelLimit`, and 80 is pinned here as a literal
+    /// (`ComposePostTests.testPlaceLabelLimitMirrorsTheServerClamp` pins the constant to the same
+    /// SQL from the other side).
     func testLabelIsClampedToTheServerLimit() {
         let long = String(repeating: "a", count: 200)
         let place = PlacePickerSheet.freeTextPlace(from: long)
         XCTAssertEqual(place?.label.count, 80,
                        "server truncates place_label at 80; clamp before sending")
+    }
+
+    /// The clamp is in the server's unit. `left(v_label, 80)` and `posts_place_label_length`'s
+    /// `char_length(place_label) <= 80` both count code points, so a label of 60 NFD-decomposed
+    /// characters (120 code points) passed a grapheme-based clamp untouched and was then cut by
+    /// the server. A label is short enough that the loss is visible — "Café Kürbis…" losing its
+    /// tail — which is why this is worth pinning separately from the ASCII case above.
+    func testLabelClampIsMeasuredInTheCodePointsPostgresCounts() throws {
+        let nfd = String(repeating: "u\u{0308}", count: 60)
+        XCTAssertEqual(nfd.count, 60, "fixture: 60 user-visible characters")
+        XCTAssertEqual(nfd.unicodeScalars.count, 120, "fixture: 120 code points — what Postgres counts")
+
+        let place = try XCTUnwrap(PlacePickerSheet.freeTextPlace(from: nfd))
+
+        XCTAssertEqual(place.label.unicodeScalars.count, 80,
+                       "the clamp must leave nothing for left(v_label, 80) to cut")
+        XCTAssertEqual(place.label.count, 40, "80 code points of two-scalar clusters is 40 characters")
     }
 
     func testPubCategoriesAreTreatedAsPubsAndOthersAsPlaces() {

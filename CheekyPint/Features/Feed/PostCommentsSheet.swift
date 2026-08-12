@@ -18,6 +18,34 @@ import CheekyPintCore
 /// `@displayName` is still literally present — so deleting the visible mention text is enough to
 /// drop it, with no re-parse.
 struct PostCommentsSheet: View {
+    /// Mirrors `add_comment`'s `left(v_body, 280)` clamp
+    /// (`20260811000600_rpc_feed_social.sql`), re-exported from the view model that actually sends
+    /// so the counter, the Send gate and the clamp can never disagree about the number.
+    static let bodyLimit = PostCommentsViewModel.bodyLimit
+
+    /// Shared with `ComposePostSheet`'s reasoning: the counter and the gate must both measure what
+    /// will be **stored**, in the server's unit (code points), not raw grapheme clusters — see
+    /// `ProfileTextSanitizer.sanitizedLength`.
+    private static let sanitizer = ProfileTextSanitizer()
+
+    /// How long this draft will be once stored. `static` so the Send gate below is directly
+    /// testable without a view instance, matching `ComposePostSheet.bodyLength(of:)`.
+    static func bodyLength(of body: String) -> Int {
+        sanitizer.sanitizedLength(body, allowNewlines: true)
+    }
+
+    /// Whether Send should be enabled, ignoring the in-flight check the view adds on top.
+    ///
+    /// The over-limit half is the point of this function existing. Without it a 350-character
+    /// comment left Send enabled, `PostCommentsViewModel.send` clamped it to 280, returned `true`,
+    /// and the composer cleared the draft — 70 characters gone with nothing on screen to say so.
+    /// `ComposePostSheet.canSubmit` has always deliberately refused to do that for its own 500
+    /// limit; this is the same rule for the comment composer's 280.
+    static func canSend(body: String) -> Bool {
+        let length = bodyLength(of: body)
+        return length > 0 && length <= bodyLimit
+    }
+
     let postID: UUID
     /// Forwarded straight to `PostCommentsViewModel.init` — see that type's doc: this is a
     /// **delta** (`+1`/`-1`), not an absolute count.
@@ -330,28 +358,44 @@ struct PostCommentsSheet: View {
     // MARK: - Composer
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
-            TextField("Add a comment…", text: $commentBody, axis: .vertical)
-                .lineLimit(1...4)
-                .accessibilityIdentifier("comment-body-field")
-                .accessibilityLabel("Comment")
-            Button {
-                Task { await send() }
-            } label: {
-                Image(systemName: "paperplane.fill")
+        VStack(alignment: .trailing, spacing: Theme.Spacing.xxs) {
+            HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
+                TextField("Add a comment…", text: $commentBody, axis: .vertical)
+                    .lineLimit(1...4)
+                    .accessibilityIdentifier("comment-body-field")
+                    .accessibilityLabel("Comment")
+                Button {
+                    Task { await send() }
+                } label: {
+                    Image(systemName: "paperplane.fill")
+                }
+                .disabled(!canSend)
+                .frame(minWidth: Theme.minTapTarget, minHeight: Theme.minTapTarget)
+                .accessibilityIdentifier("comment-send")
+                .accessibilityLabel("Send comment")
             }
-            .disabled(!canSend)
-            .frame(minWidth: Theme.minTapTarget, minHeight: Theme.minTapTarget)
-            .accessibilityIdentifier("comment-send")
-            .accessibilityLabel("Send comment")
+            // Always visible, matching `ComposePostSheet`'s counter rather than appearing only
+            // once the draft is nearly full: a counter that shows up late is a counter the user
+            // discovers *after* writing past the limit, which is when it is least useful.
+            Text("\(bodyLength)/\(Self.bodyLimit)")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(isOverLimit ? Theme.Palette.warning : Theme.Palette.textSecondary)
+                .accessibilityIdentifier("comment-body-counter")
+                .accessibilityLabel("\(bodyLength) of \(Self.bodyLimit) characters used")
         }
         .padding(Theme.Spacing.sm)
         .background(Theme.Palette.backgroundSecondary)
     }
 
+    /// Both read through `Self.bodyLength` so what the counter shows and what Send gates on are
+    /// the same number, measured the way the server will measure it.
+    private var bodyLength: Int { Self.bodyLength(of: commentBody) }
+
+    private var isOverLimit: Bool { bodyLength > Self.bodyLimit }
+
     private var canSend: Bool {
         guard let model else { return false }
-        return !model.isSending && !commentBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return !model.isSending && Self.canSend(body: commentBody)
     }
 
     private func send() async {

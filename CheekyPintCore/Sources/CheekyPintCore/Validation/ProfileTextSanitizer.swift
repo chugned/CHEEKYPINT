@@ -5,6 +5,26 @@ import Foundation
 /// runs of whitespace, and enforces length limits (master prompt §14, §19). This is a
 /// belt-and-braces measure — the server sanitises too — but doing it client-side gives
 /// immediate feedback and avoids round trips.
+///
+/// **Every length here is measured in Unicode scalars (code points), because that is what
+/// Postgres measures.** `char_length(t)` and `left(t, n)` both count code points, so every
+/// server-side limit this type mirrors is a code-point limit:
+/// `profiles.display_name`/`bio`/`city` (`char_length` CHECK constraints — a hard `23514`
+/// rejection, since profile writes are a plain PostgREST `PATCH` with no server-side clamp),
+/// `create_post`'s `left(v_body, 500)`/`left(v_label, 80)`, `add_comment`'s `left(v_body, 280)`,
+/// and the report RPCs' `left(p_details, 1000)`.
+///
+/// Counting grapheme clusters instead (`String.count`, `String.prefix`) diverges from all of
+/// those the moment text contains a multi-scalar cluster — NFD-decomposed umlauts (`a` + U+0308,
+/// which is what macOS pastes), a flag (two regional indicators), an emoji with a variation
+/// selector, a skin-tone modifier. 300 NFD "characters" is 600 code points: one grapheme cluster
+/// per user-visible character, two code points each. Under grapheme counting the client would
+/// report 300 of 500 used, send all 600 code points, and let `left(v_body, 500)` silently drop
+/// the last 50 characters — or, for a display name, be rejected outright by the CHECK constraint.
+///
+/// Truncation still cuts only at grapheme-cluster boundaries, so the *result* is never a split
+/// emoji or an orphaned combining mark; it is the *budget* that is counted in scalars. For pure
+/// ASCII the two measures are identical, so nothing about ASCII behaviour changes.
 public struct ProfileTextSanitizer: Sendable {
     public static let displayNameMaxLength = 40
     public static let bioMaxLength = 160
@@ -36,6 +56,24 @@ public struct ProfileTextSanitizer: Sendable {
     /// `sanitizeDisplayName`/`sanitizeBio`, just parameterised instead of duplicated per field.
     public func sanitize(_ raw: String, allowNewlines: Bool, maxLength: Int) -> String {
         clean(raw, allowNewlines: allowNewlines, maxLength: maxLength)
+    }
+
+    /// How long `raw` will be **once stored** — the cleaned text's code-point count, which is
+    /// exactly what Postgres `char_length` will report and what `left(…, n)` measures against.
+    ///
+    /// This is what a live character counter must display, not `raw.count`. Two independent
+    /// reasons: the count must be in the server's unit (see this type's doc), and it must be of
+    /// the *cleaned* text, since cleaning both removes scalars (zero-width joiners, bidi
+    /// overrides, control characters) and collapses whitespace runs. Counting raw scalars instead
+    /// would over-report — 80 ZWJ family emoji are 560 raw scalars but only 320 once the joiners
+    /// are stripped — and so would block a post the server would have accepted intact.
+    ///
+    /// The guarantee this buys the caller: if `sanitizedLength(raw, allowNewlines:) <= limit`,
+    /// then `sanitize(raw, allowNewlines:, maxLength: limit)` truncates nothing and the server's
+    /// own clamp is a no-op. A counter reading at or under the limit therefore means "all of this
+    /// will be stored", not "most of it probably will".
+    public func sanitizedLength(_ raw: String, allowNewlines: Bool) -> Int {
+        clean(raw, allowNewlines: allowNewlines, maxLength: .max).unicodeScalars.count
     }
 
     // MARK: - Core
@@ -74,10 +112,28 @@ public struct ProfileTextSanitizer: Sendable {
             collapsed = collapseSpaces(filtered.replacingOccurrences(of: "\n", with: " "))
         }
 
-        // 3. Trim and truncate by grapheme cluster so we never split an emoji or accent.
+        // 3. Trim, then truncate to a *code-point* budget while cutting only at grapheme-cluster
+        //    boundaries — the budget is the server's unit (see this type's doc), the cut point is
+        //    the user's, so the result never exceeds `char_length(…) = maxLength` and never splits
+        //    an emoji or strands a combining mark.
         let trimmed = collapsed.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.count <= maxLength { return trimmed }
-        return String(trimmed.prefix(maxLength)).trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.unicodeScalars.count <= maxLength { return trimmed }
+        var truncated = ""
+        var scalarsUsed = 0
+        for character in trimmed {
+            let width = character.unicodeScalars.count
+            // A cluster that doesn't fit ends the loop rather than being partially emitted. The
+            // degenerate case — a single cluster wider than the whole budget — therefore yields
+            // "", which is correct rather than convenient: emitting a partial cluster would break
+            // the code-point guarantee this function exists to provide. No caller can reach it:
+            // the smallest limit in the app is 40 (display name) and the widest cluster that
+            // survives step 1 is a handful of scalars (joiners, the widest offenders, are stripped
+            // there), so `width > maxLength` needs a limit in the single digits.
+            guard scalarsUsed + width <= maxLength else { break }
+            truncated.append(character)
+            scalarsUsed += width
+        }
+        return truncated.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func collapseSpaces(_ input: String) -> String {
