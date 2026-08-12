@@ -72,6 +72,20 @@ struct FeedPostCard: View {
         }
     }
 
+    /// Fixed tile height for the photo, independent of the source image's aspect ratio. This is
+    /// the load-bearing constraint: `.resizable().scaledToFill()` sizes itself from whatever it's
+    /// proposed, and with only `.frame(maxWidth: .infinity)` above it — a "grow to fill" request,
+    /// not a cap — SwiftUI's ideal-size pass for the enclosing `VStack` had nothing to derive a
+    /// width from, so it fell back to the underlying `UIImage`'s native pixel size (1200×900 for
+    /// the demo photo) as the image's ideal width. The `VStack` adopted that as the card's width,
+    /// which is what pushed the whole card past the screen edge. Pinning `minHeight == maxHeight`
+    /// here means every layout pass — the ideal-size query included — always has a concrete
+    /// height to derive width from via the image's own aspect ratio, so the derived width is
+    /// always a small, sane multiple of this constant, never the source pixel size. Fixing the
+    /// height also gives every card in the feed the same photo tile size regardless of the source
+    /// image's orientation.
+    private static let photoHeight: CGFloat = 200
+
     @ViewBuilder
     private var photo: some View {
         if let imageURL {
@@ -88,9 +102,10 @@ struct FeedPostCard: View {
                     }
                 }
             }
-            .aspectRatio(16.0 / 9.0, contentMode: .fill)
-            .frame(maxWidth: .infinity)
-            .clipped()
+            .frame(maxWidth: .infinity, minHeight: Self.photoHeight, maxHeight: Self.photoHeight)
+            // `.clipShape` alone clips rendering to the rounded-rect bounds established by the
+            // frame above; a preceding plain `.clipped()` (which clips to the same rectangular
+            // bounds) has no additional effect once `.clipShape` is present, so it's dropped.
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
         }
     }
