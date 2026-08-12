@@ -346,7 +346,8 @@ declare v_uid uuid := auth.uid();
 begin
   if v_uid is null then raise exception 'Not authenticated' using errcode = '28000'; end if;
   if p_period_kind not in ('session', 'week', 'month', 'year') then
-    raise exception 'Invalid period kind %', p_period_kind using errcode = '22023';
+    -- Never reflect the caller's raw parameter back into user-facing text.
+    raise exception 'Invalid leaderboard period' using errcode = '22023';
   end if;
   if p_period_kind = 'session' and p_session_id is null then
     raise exception 'Session period requires a session id' using errcode = '22023';

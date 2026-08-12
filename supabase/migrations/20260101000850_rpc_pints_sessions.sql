@@ -28,7 +28,9 @@ declare
 begin
   if v_uid is null then raise exception 'Not authenticated' using errcode = '28000'; end if;
   if p_idempotency_key is null or char_length(p_idempotency_key) = 0 then
-    raise exception 'Missing idempotency key' using errcode = '22023';
+    -- A missing key is always a client bug (the app generates one for every call) — never
+    -- something the user caused or can fix, so this reads as a plain retry, not a diagnostic.
+    raise exception 'Couldn''t save that. Please try again.' using errcode = '22023';
   end if;
 
   -- Fast idempotent path: if this key already produced a row, return it unchanged.
@@ -47,7 +49,8 @@ begin
   -- Never trust a wildly future device clock; clamp small skews, reject large ones.
   v_occurred := coalesce(p_occurred_at, now());
   if v_occurred > now() + interval '5 minutes' then
-    raise exception 'occurred_at is in the future' using errcode = '22023';
+    -- No column name in user-facing text — "occurred_at" means nothing to the person reading it.
+    raise exception 'That time can''t be in the future' using errcode = '22023';
   end if;
 
   -- If attaching to a session, the caller must be a current member.
