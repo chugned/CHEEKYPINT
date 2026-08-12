@@ -126,7 +126,13 @@ struct ReportContentView: View {
                         .accessibilityLabel("Details")
                     HStack {
                         Spacer(minLength: 0)
-                        Text("\(detailsLength)/\(Self.detailsLimit)")
+                        // `verbatim:` matters here. `Text("\(int)")` goes through
+                        // `LocalizedStringKey`, which formats the number for the current locale —
+                        // on a German device that rendered this counter as "0/1.000", which reads
+                        // as a decimal. A character counter wants bare digits. The two composer
+                        // counters use `verbatim:` for the same reason; their limits (500/280) just
+                        // happen to sit below the grouping threshold, so it never showed there.
+                        Text(verbatim: "\(detailsLength)/\(Self.detailsLimit)")
                             .font(Theme.Typography.caption)
                             .foregroundStyle(isOverLimit ? Theme.Palette.warning : Theme.Palette.textSecondary)
                             .accessibilityIdentifier("report-content-details-counter")

@@ -122,7 +122,10 @@ struct ComposePostSheet: View {
                 .accessibilityLabel("Post text")
             HStack {
                 Spacer(minLength: 0)
-                Text("\(bodyLength)/\(Self.bodyLimit)")
+                // `verbatim:` so the count is bare digits: `Text("\(int)")` routes through
+                // `LocalizedStringKey` and applies the locale's digit grouping (a 1500-character
+                // draft rendered "1.500/500" on a German device).
+                Text(verbatim: "\(bodyLength)/\(Self.bodyLimit)")
                     .font(Theme.Typography.caption)
                     .foregroundStyle(isOverLimit ? Theme.Palette.warning : Theme.Palette.textSecondary)
                     .accessibilityIdentifier("compose-post-counter")

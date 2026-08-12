@@ -362,7 +362,8 @@ struct PostCommentsSheet: View {
             // Always visible, matching `ComposePostSheet`'s counter rather than appearing only
             // once the draft is nearly full: a counter that shows up late is a counter the user
             // discovers *after* writing past the limit, which is when it is least useful.
-            Text("\(bodyLength)/\(Self.bodyLimit)")
+            // `verbatim:` for the same reason as `ComposePostSheet`'s counter — see there.
+            Text(verbatim: "\(bodyLength)/\(Self.bodyLimit)")
                 .font(Theme.Typography.caption)
                 .foregroundStyle(isOverLimit ? Theme.Palette.warning : Theme.Palette.textSecondary)
                 .accessibilityIdentifier("comment-body-counter")
