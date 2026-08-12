@@ -1,12 +1,17 @@
 -- CheekyPint: reporting feed content. Mirrors public.report_user's shape and rate-limit action
 -- so the moderation queue stays one uniform surface.
 --
--- p_details is free text that a human moderator reads, so it goes through
--- public.strip_ugc_control_chars before storage, exactly like create_post's body/place label and
--- add_comment's body. Without it a bidi override (U+202E) or a zero-width run landed verbatim in
--- reports.details, letting a reporter scramble or spoof what the moderator sees — in the one
--- column whose whole purpose is to be read by a person deciding whether text is abusive.
--- left(..., 1000) alone bounded the length but not the content.
+-- p_details is free text that a human moderator reads, so it is sanitised before storage, exactly
+-- like create_post's body and add_comment's body. Without it a bidi override (U+202E) or a
+-- zero-width run landed verbatim in reports.details, letting a reporter scramble or spoof what the
+-- moderator sees — in the one column whose whole purpose is to be read by a person deciding whether
+-- text is abusive. left(..., 1000) alone bounded the length but not the content.
+--
+-- The MULTILINE variant, because the details field is `axis: .vertical` with `lineLimit(3...6)`: a
+-- reporter describing what happened writes paragraphs, and a moderator reading a wall of
+-- newline-deleted text is worse off than one reading the structure the reporter typed. The newlines
+-- count against left(..., 1000) like any other character, which is what the client's counter
+-- already assumes.
 
 create or replace function public.report_post(
   p_post_id uuid,
@@ -37,7 +42,7 @@ begin
 
   insert into public.reports (reporter_id, reported_user_id, category, details, post_id)
   values (v_uid, v_author, p_category,
-          left(btrim(public.strip_ugc_control_chars(p_details)), 1000), p_post_id)
+          left(public.strip_ugc_control_chars_multiline(p_details), 1000), p_post_id)
   returning * into v_row;
 
   return jsonb_build_object('report_id', v_row.id, 'status', v_row.status);
@@ -77,7 +82,7 @@ begin
 
   insert into public.reports (reporter_id, reported_user_id, category, details, comment_id)
   values (v_uid, v_author, p_category,
-          left(btrim(public.strip_ugc_control_chars(p_details)), 1000), p_comment_id)
+          left(public.strip_ugc_control_chars_multiline(p_details), 1000), p_comment_id)
   returning * into v_row;
 
   return jsonb_build_object('report_id', v_row.id, 'status', v_row.status);

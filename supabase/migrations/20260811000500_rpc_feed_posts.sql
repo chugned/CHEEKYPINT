@@ -23,7 +23,14 @@ begin
 
   perform public.enforce_rate_limit('post_create', 20, interval '1 hour');
 
-  v_body := nullif(btrim(public.strip_ugc_control_chars(p_body)), '');
+  -- The body keeps its line breaks: ComposePostSheet's field is `axis: .vertical` and
+  -- FeedPostCard renders it with a bare `Text(body)`, so a paragraph the user typed is a paragraph
+  -- the feed shows. `strip_ugc_control_chars` deletes chr(10) with every other control character,
+  -- which flattened every multi-line post on the way in. The multiline variant trims its own ends,
+  -- so no btrim is needed here.
+  v_body := nullif(public.strip_ugc_control_chars_multiline(p_body), '');
+  -- The place label stays single-line: it is not free-typed (PlacePickerSheet derives it from the
+  -- chosen map item) and the card renders it on one line beside the pub glyph.
   v_label := nullif(btrim(public.strip_ugc_control_chars(p_place_label)), '');
   -- Sanitised once into a local so the emptiness check and the insert always agree — an
   -- unsanitised image_path let whitespace-only paths (e.g. a bare tab) through the guard.

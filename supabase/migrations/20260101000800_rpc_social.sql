@@ -203,11 +203,12 @@ $$;
 -- report_user: queue a moderation report.
 --
 -- p_details is free text that a human moderator reads, so it goes through
--- public.strip_ugc_control_chars (20260101000150_common_functions.sql) before storage — the same
--- treatment report_post/report_comment give the very same reports.details column
--- (20260811000700_rpc_feed_reports.sql). left(..., 1000) alone bounded the length but not the
--- content, so a bidi override (U+202E) or a zero-width run landed verbatim in front of the person
--- deciding whether the reported text is abusive.
+-- public.strip_ugc_control_chars_multiline (20260101000150_common_functions.sql) before storage —
+-- the same treatment report_post/report_comment give the very same reports.details column
+-- (20260811000700_rpc_feed_reports.sql), and multi-line for the same reason: the details field
+-- accepts paragraph breaks and the moderator should see them. left(..., 1000) alone bounded the
+-- length but not the content, so a bidi override (U+202E) or a zero-width run landed verbatim in
+-- front of the person deciding whether the reported text is abusive.
 create or replace function public.report_user(
   p_target uuid,
   p_category public.report_category,
@@ -228,7 +229,7 @@ begin
 
   insert into public.reports (reporter_id, reported_user_id, category, details)
   values (v_uid, p_target, p_category,
-          left(btrim(public.strip_ugc_control_chars(p_details)), 1000))
+          left(public.strip_ugc_control_chars_multiline(p_details), 1000))
   returning * into v_row;
 
   return jsonb_build_object('report_id', v_row.id, 'status', v_row.status);

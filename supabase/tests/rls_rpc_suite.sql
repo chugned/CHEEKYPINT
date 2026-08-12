@@ -232,6 +232,52 @@ do $$ declare v text; begin
   raise notice 'PASS t27: control, zero-width, bidi and isolate characters are stripped';
 end $$;
 
+-- t27b: the newline-preserving sibling, asserted directly rather than only through its callers.
+-- Every case below is a separate literal expectation, so no single mistake in the function can pass
+-- all of them: the first pins that the OTHER control characters still go while LF survives, the
+-- next two pin CRLF/CR normalisation, the fourth blank-line collapsing, the fifth end-trimming, and
+-- the last two the degenerate inputs the callers' nullif(..., '') depends on.
+do $$ declare v text; begin
+  -- LF survives; the tab, zero-width space and RTL override on either side of it do not.
+  select public.strip_ugc_control_chars_multiline(
+           'a' || chr(9) || chr(8203) || chr(10) || chr(8237) || 'b') into v;
+  if v is distinct from 'a' || chr(10) || 'b' then
+    raise exception 'FAIL t27b: expected a<LF>b, got %', quote_literal(v); end if;
+
+  -- CRLF is one break, not two and not zero.
+  select public.strip_ugc_control_chars_multiline('a' || chr(13) || chr(10) || 'b') into v;
+  if v is distinct from 'a' || chr(10) || 'b' then
+    raise exception 'FAIL t27b: CRLF became %', quote_literal(v); end if;
+
+  -- A lone CR (some on-screen keyboards) is a break too, not a deletion.
+  select public.strip_ugc_control_chars_multiline('a' || chr(13) || 'b') into v;
+  if v is distinct from 'a' || chr(10) || 'b' then
+    raise exception 'FAIL t27b: lone CR became %', quote_literal(v); end if;
+
+  -- One blank line survives (an ordinary paragraph break); a run of them collapses to one.
+  select public.strip_ugc_control_chars_multiline('a' || repeat(chr(10), 2) || 'b') into v;
+  if v is distinct from 'a' || repeat(chr(10), 2) || 'b' then
+    raise exception 'FAIL t27b: a single blank line must survive, got %', quote_literal(v); end if;
+  select public.strip_ugc_control_chars_multiline('a' || repeat(chr(10), 40) || 'b') into v;
+  if v is distinct from 'a' || repeat(chr(10), 2) || 'b' then
+    raise exception 'FAIL t27b: 40 newlines collapsed to %', quote_literal(v); end if;
+
+  -- Ends are trimmed, including newlines (btrim alone would leave the blank lines).
+  select public.strip_ugc_control_chars_multiline(chr(10) || '  a' || chr(10) || 'b  ' || chr(10)) into v;
+  if v is distinct from 'a' || chr(10) || 'b' then
+    raise exception 'FAIL t27b: ends not trimmed, got %', quote_literal(v); end if;
+
+  -- Degenerate inputs the callers' nullif(..., '') relies on.
+  select public.strip_ugc_control_chars_multiline(repeat(chr(10), 5)) into v;
+  if v is distinct from '' then
+    raise exception 'FAIL t27b: newlines-only gave %, want empty', quote_literal(v); end if;
+  select public.strip_ugc_control_chars_multiline(null) into v;
+  if v is distinct from '' then
+    raise exception 'FAIL t27b: null gave %, want empty', quote_literal(v); end if;
+
+  raise notice 'PASS t27b: strip_ugc_control_chars_multiline keeps line breaks, normalises CRLF/CR, collapses blank-line runs and trims its ends';
+end $$;
+
 -- ============================ FEED: posts ============================
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000a1';
 
@@ -855,6 +901,22 @@ begin
   if char_length(v_details) <> 1000 then
     raise exception 'FAIL t43e: details length % (want 1000)', char_length(v_details); end if;
 
+  -- ...and the paragraphs the reporter typed must reach the moderator. The details field is
+  -- `axis: .vertical` with `lineLimit(3...6)`, so someone describing an incident writes several
+  -- lines; the single-line stripper deleted every one of them. The tab below still goes and the run
+  -- of blank lines still collapses to one, so this is not "controls are no longer stripped".
+  select public.report_post(v_post, 'harassment',
+                            'what happened' || chr(9) || chr(13) || chr(10) ||
+                            'then this' || repeat(chr(10), 4) || 'and this') into v;
+  select details into v_details from public.reports where id = (v->>'report_id')::uuid;
+  if v_details is distinct from 'what happened' || chr(10) || 'then this' || chr(10) || chr(10) || 'and this' then
+    raise exception 'FAIL t43e: report_post flattened multi-line details to %', quote_literal(v_details); end if;
+
+  select public.report_comment(v_comment, 'harassment', 'first line' || chr(10) || 'second line') into v;
+  select details into v_details from public.reports where id = (v->>'report_id')::uuid;
+  if v_details is distinct from 'first line' || chr(10) || 'second line' then
+    raise exception 'FAIL t43e: report_comment flattened multi-line details to %', quote_literal(v_details); end if;
+
   raise notice 'PASS t43e: report_post/report_comment strip control, zero-width and bidi characters from details';
 end $$;
 
@@ -887,6 +949,13 @@ begin
   select details into v_details from public.reports where id = (v->>'report_id')::uuid;
   if char_length(v_details) <> 1000 then
     raise exception 'FAIL t43f: details length % (want 1000)', char_length(v_details); end if;
+
+  -- And the same multi-line requirement as t43e: one column, one behaviour, three RPCs.
+  select public.report_user('00000000-0000-4000-8000-0000000000b2', 'harassment',
+                            'first line' || chr(13) || chr(10) || 'second line') into v;
+  select details into v_details from public.reports where id = (v->>'report_id')::uuid;
+  if v_details is distinct from 'first line' || chr(10) || 'second line' then
+    raise exception 'FAIL t43f: report_user flattened multi-line details to %', quote_literal(v_details); end if;
 
   raise notice 'PASS t43f: report_user strips control, zero-width and bidi characters from details';
 end $$;
@@ -1574,14 +1643,66 @@ begin
   if char_length(v_note) <> 280 then
     raise exception 'FAIL t54: private_note length % (want 280)', char_length(v_note); end if;
 
+  -- The note field is `axis: .vertical`, so the user can type paragraph breaks, and the value comes
+  -- back to them verbatim in the Art. 15 export — so the breaks must survive. This is the inverse of
+  -- the assertion it replaces, which pinned the newline being DELETED: that was the behaviour
+  -- LogPintSheet's space-join worked around, and both the workaround and that assertion are now gone.
+  -- The tab is still deleted and the blank-line run still collapses to one.
   select public.create_pint_entry('t54-newline', now(), 'pint', null, false, null, null,
-                                  'first' || chr(10) || 'second') into v;
+                                  'first' || chr(9) || chr(13) || chr(10) ||
+                                  'second' || repeat(chr(10), 6) || 'third') into v;
   v_note := v->>'private_note';
-  if v_note is distinct from 'firstsecond' then
-    raise exception 'FAIL t54: newline handling stored % (want ''firstsecond'' — the newline is deleted, '
-                    'so the client must not use one as a separator)', quote_literal(v_note); end if;
+  if v_note is distinct from 'first' || chr(10) || 'second' || chr(10) || chr(10) || 'third' then
+    raise exception 'FAIL t54: private_note newline handling stored %', quote_literal(v_note); end if;
 
-  raise notice 'PASS t54: create_pint_entry strips control, zero-width and bidi characters from private_note, and cannot store a line break';
+  raise notice 'PASS t54: create_pint_entry strips control, zero-width and bidi characters from private_note while keeping its line breaks';
+end $$;
+
+-- t55: posts.body and post_comments.body keep their line breaks through the real RPCs.
+--
+-- Both composers are `axis: .vertical`, both render with a bare `Text` (FeedPostCard's `Text(body)`;
+-- PostCommentsSheet's `Text(highlightedBody(...))`, whose per-character mask preserves every
+-- character it is handed), and both client sanitiser calls already passed `allowNewlines: true`. Only
+-- the server disagreed, so every paragraph break typed into a post or a comment was deleted on the
+-- way in — and because demo mode stores the client-sanitised string verbatim, the same text kept its
+-- layout in demo mode and lost it against a real server.
+--
+-- Read back through feed_page / post_comments_page rather than the tables, so this asserts what a
+-- client actually receives. Ceri acts here: she is well inside post_create's 20/hour.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000c3';
+do $$
+declare v jsonb; v_post uuid; v_body text; v_label text; v_payload text; v_expected text;
+begin
+  -- One payload covering all three behaviours: a tab that must still be deleted, a CRLF that must
+  -- become one break, and a five-newline run that must collapse to a single blank line.
+  v_payload := 'line one' || chr(9) || chr(13) || chr(10) ||
+               'line two' || repeat(chr(10), 5) || 'line three';
+  v_expected := 'line one' || chr(10) || 'line two' || chr(10) || chr(10) || 'line three';
+
+  select public.create_post(v_payload, null, null, null) into v;
+  v_post := (v->>'post_id')::uuid;
+  select body into v_body from public.feed_page(null, null, 20) where post_id = v_post;
+  if v_body is distinct from v_expected then
+    raise exception 'FAIL t55: create_post stored body % (want %)',
+                    quote_literal(v_body), quote_literal(v_expected); end if;
+
+  select public.add_comment(v_post, v_payload, null) into v;
+  select body into v_body from public.post_comments_page(v_post, null, null, 30)
+   where comment_id = (v->>'comment_id')::uuid;
+  if v_body is distinct from v_expected then
+    raise exception 'FAIL t55: add_comment stored body % (want %)',
+                    quote_literal(v_body), quote_literal(v_expected); end if;
+
+  -- The contrast that proves this is a per-field split and not "controls are no longer stripped":
+  -- place_label is single-line (not free-typed — PlacePickerSheet derives it from the chosen map
+  -- item — and rendered on one line beside the pub glyph), so its newline is still deleted.
+  select public.create_post('body for the label check', null, 'Prague' || chr(10) || 'Old Town', null) into v;
+  select place_label into v_label from public.feed_page(null, null, 20)
+   where post_id = (v->>'post_id')::uuid;
+  if v_label is distinct from 'PragueOld Town' then
+    raise exception 'FAIL t55: place_label must stay single-line, got %', quote_literal(v_label); end if;
+
+  raise notice 'PASS t55: posts.body and post_comments.body keep their line breaks; place_label stays single-line';
 end $$;
 
 reset role;

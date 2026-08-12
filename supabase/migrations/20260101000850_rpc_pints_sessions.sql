@@ -1,19 +1,23 @@
 -- CheekyPint schema — 08b. RPCs: pint logging/undo, sessions, clinks, account deletion
 --
--- Both free-text columns written from here — pub_sessions.name and pint_entries.private_note —
--- go through public.strip_ugc_control_chars (20260101000150_common_functions.sql) before storage,
--- like create_post's body/place label, add_comment's body and all three report RPCs' details.
--- Previously each applied only left(..., N), which bounded the length but not the content.
+-- Both free-text columns written from here — pub_sessions.name and pint_entries.private_note — are
+-- sanitised before storage (20260101000150_common_functions.sql), like create_post's body/place
+-- label, add_comment's body and all three report RPCs' details. Previously each applied only
+-- left(..., N), which bounded the length but not the content.
 --
--- pub_sessions.name is the one that matters most: ActiveSessionView renders it as the navigation
--- title for **every member of the session**, so a bidi override or zero-width run in a session name
--- is a payload displayed on other people's screens, not just the author's. private_note is private
--- to its author, but it is read back and displayed, and there is no reason for it to be the last
--- unsanitised column.
+-- The two take DIFFERENT sanitisers, because the two fields are different shapes:
 --
--- Note that strip_ugc_control_chars deletes newlines along with every other C0 control character,
--- so neither column can store a line break. LogPintSheet composes its note accordingly (a space,
--- not a newline, between the "[Beer: …]" line and the user's own words) — pinned by t54.
+--   pub_sessions.name → strip_ugc_control_chars (single-line). Its field is a plain one-line
+--   TextField and ActiveSessionView renders it as the navigation title, which is one line by
+--   definition. It is also the one with a cross-user render path: that title is shown to **every
+--   member of the session**, so a bidi override in a session name is a payload on other people's
+--   screens, not just the author's.
+--
+--   pint_entries.private_note → strip_ugc_control_chars_multiline. Its field is `axis: .vertical`,
+--   so the user can type paragraph breaks, and the value comes back to them verbatim in the Art. 15
+--   export. Flattening it was a client-side workaround for this function deleting chr(10); with the
+--   newline-preserving variant the workaround is gone and LogPintSheet is back to joining its
+--   "[Beer: …]" line to the user's words with a newline. Pinned by t54.
 
 -- create_pint_entry: the one true way to record a drink. Idempotent, rate-limited, server-
 -- stamped, and session-membership-validated. Returns the stored row (existing one on retry).
@@ -88,7 +92,7 @@ begin
     v_uid, p_pub_id, p_session_id, v_occurred, p_serving_type,
     case when p_serving_type = 'custom' then p_volume_ml else null end,
     coalesce(p_alcohol_free, false),
-    nullif(left(btrim(public.strip_ugc_control_chars(p_private_note)), 280), ''),
+    nullif(left(public.strip_ugc_control_chars_multiline(p_private_note), 280), ''),
     coalesce(p_source, 'manual'), p_idempotency_key, v_flagged
   )
   on conflict (user_id, idempotency_key) do nothing

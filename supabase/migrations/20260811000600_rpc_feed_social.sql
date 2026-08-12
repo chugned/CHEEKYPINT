@@ -85,7 +85,10 @@ begin
 
   perform public.enforce_rate_limit('post_comment', 60, interval '1 hour');
 
-  v_body := nullif(btrim(public.strip_ugc_control_chars(p_body)), '');
+  -- Multi-line, like posts.body: the composer is `axis: .vertical` and PostCommentsSheet renders
+  -- the comment through `highlightedBody`, a per-character mask that preserves every character it is
+  -- given, newlines included.
+  v_body := nullif(public.strip_ugc_control_chars_multiline(p_body), '');
   if v_body is null then
     raise exception 'A comment needs some words' using errcode = '22023';
   end if;
