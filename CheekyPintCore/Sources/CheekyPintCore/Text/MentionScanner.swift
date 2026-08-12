@@ -35,13 +35,40 @@ public enum MentionScanner {
     }
 
     /// Of the recorded `[UUID: displayName]` mentions, the ids whose `@displayName` is still
-    /// literally present in `text`. Deleting (or editing away) the visible `@Name` in the
-    /// composer is therefore enough to drop that mention — no re-parse of the final text is
-    /// needed or attempted. Order of the result is unspecified (it is derived from a
-    /// `Dictionary`); callers that care about order must sort or otherwise not depend on it.
+    /// literally present in `text`, **at a word boundary**. Deleting (or editing away) the
+    /// visible `@Name` in the composer is therefore enough to drop that mention — no re-parse of
+    /// the final text is needed or attempted. Order of the result is unspecified (it is derived
+    /// from a `Dictionary`); callers that care about order must sort or otherwise not depend on it.
+    ///
+    /// The word-boundary check matters: with friends "Ceri" and "Cerian" both recorded, backing
+    /// out of a picked "Ceri" (deleting the trailing space) and typing "an" produces the text
+    /// `"@Cerian"`. A bare `text.contains("@Ceri")` is true there — it's a literal substring —
+    /// which would wrongly keep mentioning Ceri (a person the final text doesn't actually
+    /// reference) while never mentioning Cerian (who was never picked at all). Requiring the
+    /// character immediately after the match to not be a letter/digit closes that: `"Ceri"` is
+    /// immediately followed by `"a"` in `"Cerian"`, which fails the boundary, so it correctly
+    /// does not count as present.
     public static func stillPresent(mentions: [UUID: String], in text: String) -> [UUID] {
         mentions.compactMap { id, displayName in
-            text.contains("@\(displayName)") ? id : nil
+            hasWordBoundedOccurrence(of: "@\(displayName)", in: text) ? id : nil
         }
+    }
+
+    /// Whether `token` occurs in `text` with nothing "continuing" the token immediately after the
+    /// match — i.e. the character right after the match, if any, is not a letter or digit. Checks
+    /// every occurrence (not just the first), since an early occurrence lacking a boundary
+    /// (`"@Ceri"` inside `"@Cerian"`) must not shadow a later, genuinely boundary-valid one.
+    private static func hasWordBoundedOccurrence(of token: String, in text: String) -> Bool {
+        guard !token.isEmpty else { return false }
+        var searchRange = text.startIndex..<text.endIndex
+        while let range = text.range(of: token, range: searchRange) {
+            let boundaryOK = range.upperBound == text.endIndex
+                || !(text[range.upperBound].isLetter || text[range.upperBound].isNumber)
+            if boundaryOK { return true }
+            // Retry from just past this match's start, so an overlapping later occurrence of the
+            // same token starting one character on is still found.
+            searchRange = text.index(after: range.lowerBound)..<text.endIndex
+        }
+        return false
     }
 }

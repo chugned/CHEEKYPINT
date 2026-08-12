@@ -15,7 +15,7 @@ struct FeedPostState: Identifiable, Sendable {
     /// Mirrors `viewerHasCheered`/`cheersCount`'s reasoning: `post.commentCount` is the server's
     /// count as of the last page fetch, but `PostCommentsSheet` (opened from `FeedPostCard`) can
     /// add or remove comments without a full feed refetch, so this mutable copy is what the card
-    /// actually displays — updated via `FeedViewModel.updateCommentCount(postID:count:)`.
+    /// actually displays — adjusted via `FeedViewModel.applyCommentCountDelta(postID:delta:)`.
     var commentCount: Int
 
     init(_ post: FeedPostDTO) {
@@ -212,11 +212,17 @@ final class FeedViewModel {
     }
 
     /// `PostCommentsSheet`'s `onCommentCountChanged` callback, threaded through `FeedPostCard`.
+    /// `delta` is `+1`/`-1` (a confirmed send/delete), never an absolute count — `comments.count`
+    /// inside the sheet is only however many rows are loaded, not the thread total, so applying a
+    /// delta to the count this state already holds (seeded from `FeedPostDTO.commentCount`, the
+    /// server's real total) is what keeps drift structurally impossible: a 45-comment thread that
+    /// has loaded 30 rows and gets a new comment goes 45→46 either way, never 30→31.
     /// A no-op if the post has since scrolled out of `posts` (e.g. paged away while the sheet was
-    /// open) — there is nothing left to update.
-    func updateCommentCount(postID: UUID, count: Int) {
+    /// open) — there is nothing left to update. Clamped at 0 as a defensive floor only; a correct
+    /// caller never drives it negative.
+    func applyCommentCountDelta(postID: UUID, delta: Int) {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return }
-        posts[index].commentCount = count
+        posts[index].commentCount = max(0, posts[index].commentCount + delta)
     }
 }
 

@@ -19,6 +19,8 @@ import CheekyPintCore
 /// drop it, with no re-parse.
 struct PostCommentsSheet: View {
     let postID: UUID
+    /// Forwarded straight to `PostCommentsViewModel.init` — see that type's doc: this is a
+    /// **delta** (`+1`/`-1`), not an absolute count.
     let onCommentCountChanged: (Int) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -33,6 +35,20 @@ struct PostCommentsSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                // Shown here — outside `commentsList`'s own branching — so a failed send/delete
+                // is visible regardless of whether the thread is empty, loading, or populated.
+                // The old placement (a row inside the populated-thread `List`) meant a failed
+                // send on a brand-new post (zero comments — the common case right after
+                // composing) rendered the "No comments yet" empty state instead, and the error
+                // was never shown at all.
+                if let sendError = model?.sendError {
+                    Text(sendError)
+                        .font(Theme.Typography.callout)
+                        .foregroundStyle(Theme.Palette.warning)
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.top, Theme.Spacing.sm)
+                        .accessibilityIdentifier("comments-send-error")
+                }
                 commentsList
                 if let token = activeToken, !suggestions.isEmpty {
                     Divider()
@@ -81,12 +97,6 @@ struct PostCommentsSheet: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    if let sendError = model.sendError {
-                        Text(sendError)
-                            .foregroundStyle(Theme.Palette.warning)
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                    }
                     ForEach(model.comments) { comment in
                         commentRow(comment, model: model)
                             .listRowBackground(Color.clear)
@@ -136,7 +146,8 @@ struct PostCommentsSheet: View {
                                 for: createdAt, relativeTo: Date()))
                     }
                 }
-                Text(Self.highlightedBody(comment.body, mentionNames: model.friends.map(\.displayName)))
+                Text(Self.highlightedBody(comment.body, mentionedUserIDs: comment.mentionedUserIds,
+                                          friends: model.friends))
                     .font(Theme.Typography.body)
                     .foregroundStyle(Theme.Palette.textPrimary)
             }
@@ -155,19 +166,32 @@ struct PostCommentsSheet: View {
         }
     }
 
-    /// Highlights every literal occurrence of `@<name>` (for each candidate in `mentionNames`) in
-    /// `Theme.Palette.forest`. Candidates come from the viewer's own friends list — the only
-    /// display names available client-side, since `PostCommentDTO.mentionedUserIds` carries ids,
-    /// not names (mentions are recorded at write time, not re-derived from text on read; see
-    /// `comment_mentions`' own migration note). A mention of someone outside the viewer's friends
-    /// list (e.g. a mutual friend of the post's author the viewer hasn't added) simply isn't
-    /// highlighted — a cosmetic gap, not a data-correctness one, since the literal `@Name` text
-    /// the author typed is still shown either way.
+    /// Highlights every literal occurrence of `@<name>` in `Theme.Palette.forest`, but **only**
+    /// for names resolved from `mentionedUserIDs`, never from an arbitrary text match. This is
+    /// deliberate, not a convenience: the brief is explicit that the UI must never imply a
+    /// mention was delivered when it wasn't. `mentionedUserIds` is exactly what the server
+    /// recorded in `comment_mentions` at write time (see that table's own migration note); typing
+    /// `cheers @Ceri` by hand without ever using autocomplete sends **no** mention at all
+    /// (`add_comment` only records ids passed in `p_mentions`), so that literal text must render
+    /// as plain text, not as a false promise of a real tag.
     ///
+    /// Names are resolved from the viewer's own friends list — the only display names available
+    /// client-side, since `mentionedUserIds` carries ids, not names. A mention of someone outside
+    /// the viewer's friends list (e.g. a mutual friend of the post's author the viewer hasn't
+    /// added) simply isn't highlighted — a cosmetic gap, not a data-correctness one, since the
+    /// literal `@Name` text the author typed is still shown either way.
+    static func highlightedBody(_ body: String, mentionedUserIDs: [UUID], friends: [FriendDTO]) -> AttributedString {
+        let friendNamesByID = Dictionary(uniqueKeysWithValues: friends.map { ($0.userId, $0.displayName) })
+        let mentionNames = mentionedUserIDs.compactMap { friendNamesByID[$0] }
+        return highlightedBody(body, mentionNames: mentionNames)
+    }
+
     /// Marks matches with a per-character boolean mask rather than searching token-by-token into
     /// the final `AttributedString` — a longer name that is itself a superset of a shorter one
     /// ("Barnaby Pemberton-Smythe" containing "Barnaby") then highlights correctly regardless of
-    /// which order the two names are checked in, since the mask is a straightforward OR.
+    /// which order the two names are checked in, since the mask is a straightforward OR. Split
+    /// out from the public overload above purely so this pure masking logic is directly testable
+    /// without needing to fabricate `FriendDTO`s.
     static func highlightedBody(_ body: String, mentionNames: [String]) -> AttributedString {
         let characters = Array(body)
         guard !characters.isEmpty else { return AttributedString() }
@@ -222,7 +246,9 @@ struct PostCommentsSheet: View {
                 } label: {
                     HStack(spacing: Theme.Spacing.sm) {
                         RemoteAvatar(url: container.avatarURL(for: friend.avatarPath), name: friend.displayName, size: 28)
-                        Text(friend.displayName).foregroundStyle(Theme.Palette.textPrimary)
+                        Text(friend.displayName)
+                            .font(Theme.Typography.body)
+                            .foregroundStyle(Theme.Palette.textPrimary)
                         Spacer(minLength: 0)
                     }
                 }
@@ -237,13 +263,35 @@ struct PostCommentsSheet: View {
         .background(Theme.Palette.backgroundSecondary)
     }
 
-    /// Replaces the active `@token` (always at the end of `commentBody` — see `activeToken`'s
-    /// doc) with `@<displayName> ` and records the pick in `mentions`, so `send()` can later ask
-    /// `MentionScanner.stillPresent` whether it's still actually in the text.
     private func select(_ friend: FriendDTO) {
-        guard activeToken != nil, let atIndex = commentBody.lastIndex(of: "@") else { return }
-        commentBody.replaceSubrange(atIndex..<commentBody.endIndex, with: "@\(friend.displayName) ")
-        mentions[friend.userId] = friend.displayName
+        guard activeToken != nil else { return }
+        let result = Self.applyingMentionSelection(friend, to: commentBody, mentions: mentions)
+        commentBody = result.text
+        mentions = result.mentions
+    }
+
+    /// The pure core of `select(_:)` — replaces the active `@token` (always at the end of `text`,
+    /// per `activeToken`'s doc) with `@<friend.displayName> ` and records the pick in `mentions`.
+    ///
+    /// Also **prunes** any previously-recorded mention whose `@name` lived entirely inside the
+    /// token region being overwritten. Without this, extending an already-picked mention (pick
+    /// "Ceri", giving `@Ceri `, then picking a second suggestion "Ceri Ann" that the still-active
+    /// "Ceri " token also matches) leaves the stale `ceriID` behind in `mentions` alongside the
+    /// new `ceriAnnID` — and since the final text `"@Ceri Ann "` genuinely contains `"@Ceri"` at a
+    /// valid word boundary (followed by a space), `MentionScanner.stillPresent` would keep BOTH
+    /// ids at send time, silently mentioning a second person nobody intended to tag. Pruning is
+    /// scoped to the overwritten region only: it checks survival against the text with that
+    /// region removed, so an earlier, unrelated mention elsewhere in the draft is untouched.
+    static func applyingMentionSelection(
+        _ friend: FriendDTO, to text: String, mentions: [UUID: String]
+    ) -> (text: String, mentions: [UUID: String]) {
+        guard let atIndex = text.lastIndex(of: "@") else { return (text, mentions) }
+        let textBeforeToken = String(text[text.startIndex..<atIndex])
+        let survivingIDs = Set(MentionScanner.stillPresent(mentions: mentions, in: textBeforeToken))
+        var newMentions = mentions.filter { survivingIDs.contains($0.key) }
+        newMentions[friend.userId] = friend.displayName
+        let newText = textBeforeToken + "@\(friend.displayName) "
+        return (newText, newMentions)
     }
 
     // MARK: - Composer

@@ -9,9 +9,11 @@ struct FeedPostCard: View {
     let avatarURL: URL?
     let imageURL: URL?
     let onToggleCheers: () -> Void
-    /// Reported by `PostCommentsSheet` whenever a comment is added or deleted, so this card's
-    /// count reflects reality without the whole feed needing a refetch. Threaded through to
-    /// `FeedViewModel.updateCommentCount(postID:count:)` by whoever constructs this card.
+    /// A **delta** (`+1`/`-1`), reported by `PostCommentsSheet` whenever a comment is confirmed
+    /// added or deleted — never an absolute count, since the sheet only knows how many comments
+    /// it has *loaded*, not the thread total. Threaded through to
+    /// `FeedViewModel.applyCommentCountDelta(postID:delta:)` by whoever constructs this card, so
+    /// it adjusts the authoritative count this card already has rather than replacing it.
     let onCommentCountChanged: (Int) -> Void
 
     @State private var showingComments = false

@@ -35,7 +35,23 @@ final class PostCommentsViewModel {
     /// state — it's a transient, dismissable message instead.
     var sendError: String?
 
+    /// The keyset cursor to send on the *next* `loadMore()`, always taken from the last
+    /// **server-returned** comment — never from `comments.last`. `comments` can also grow from
+    /// `send()`'s locally-built echo (see that method's doc), whose timestamp is the client's own
+    /// `Date()` and therefore always sorts after every real comment; deriving the cursor from
+    /// `comments.last` would, after any send, cursor from that echo instead of the true last
+    /// server row, and the server's `(created_at, id) > cursor` filter would then find nothing
+    /// newer and return `[]` — silently stranding every comment beyond whatever was already
+    /// loaded. Set only in `fetchFirstPage()`/`loadMore()`, from the page just received.
+    private var pagingCursor: FeedCursor?
+
     private let pageSize: Int
+    /// Reports a **delta** (`+1` confirmed send, `-1` confirmed delete), not an absolute count —
+    /// `comments.count` is only the loaded page(s), not the thread total, so an absolute report
+    /// would overwrite `FeedPostCard`'s authoritative `FeedPostDTO.commentCount` with a smaller,
+    /// wrong number the moment the thread has more comments than one page. `FeedViewModel.
+    /// applyCommentCountDelta` adds this to the count it already has, which is drift-proof by
+    /// construction rather than merely usually-correct.
     private let onCommentCountChanged: (Int) -> Void
 
     private let commentsRequest: (UUID, FeedCursor?, Int) async throws -> [PostCommentDTO]
@@ -86,6 +102,7 @@ final class PostCommentsViewModel {
         isLoading = true
         loadError = nil
         comments = []
+        pagingCursor = nil
         defer { isLoading = false }
         await fetchFirstPage()
         friends = (try? await friendsRequest()) ?? []
@@ -95,14 +112,16 @@ final class PostCommentsViewModel {
     /// Infinite scroll, mirroring `FeedViewModel.loadMore()`: no-op while a load is already in
     /// flight or once a short page has said there is nothing more, and de-duplicates by id so a
     /// repeated boundary row (see `post_comments_page`'s own note on its keyset cursor) can't be
-    /// double-counted.
+    /// double-counted. Cursors from `pagingCursor`, **not** `comments.last?.cursor` — see that
+    /// property's doc for why a send's locally-appended echo would otherwise strand later pages.
     func loadMore() async {
-        guard !isLoading, hasMore, let cursor = comments.last?.cursor else { return }
+        guard !isLoading, hasMore, let cursor = pagingCursor else { return }
         isLoading = true
         defer { isLoading = false }
         do {
             let page = try await commentsRequest(postID, cursor, pageSize)
             appendDeduplicated(page)
+            if let lastServerComment = page.last { pagingCursor = lastServerComment.cursor }
             hasMore = page.count == pageSize
         } catch let cancellation where cancellation.isCancellation {
             // See the matching catch in `FeedViewModel.loadMore()` — the sheet being dismissed
@@ -118,6 +137,7 @@ final class PostCommentsViewModel {
         do {
             let page = try await commentsRequest(postID, nil, pageSize)
             comments = page
+            pagingCursor = page.last?.cursor
             hasMore = page.count == pageSize
         } catch let cancellation where cancellation.isCancellation {
         } catch let error as SupabaseError {
@@ -138,12 +158,19 @@ final class PostCommentsViewModel {
     // MARK: - Sending
 
     /// Sanitises, then sends. `mentions` is the composer's `[UUID: displayName]` record of every
-    /// suggestion the user picked; `MentionScanner.stillPresent` — not a re-parse of `cleanBody`
-    /// — decides which of those ids are still actually in the text (see that type's doc for why
+    /// suggestion the user picked; `MentionScanner.stillPresent` — not a re-parse of the body —
+    /// decides which of those ids are still actually in the text (see that type's doc for why
     /// re-parsing free text for `@Name` tokens is the wrong approach once names can contain
     /// spaces). A friend who is dropped server-side for being unable to see the post (see
     /// `add_comment`'s own note) still returns success here — that silent drop is a property of
     /// the server's response, invisible to the client either way.
+    ///
+    /// Mentions are resolved against the sanitised **but not yet length-clamped** text, then the
+    /// clamp is applied separately for what's actually sent. Doing both against the already-
+    /// truncated 280-char body would let the clamp cut a mention's name mid-word (e.g. a comment
+    /// ending "...@Barnaby Pemberton-Smythe" at character 300) and silently drop a mention the
+    /// user clearly finished typing, while the corrupted partial name lingers in the visible,
+    /// sent text either way. Scanning the untruncated text preserves the user's evident intent.
     ///
     /// Returns whether the send succeeded, purely so `PostCommentsSheet` knows whether to clear
     /// its draft text — the view model's own state (`comments`, `sendError`) is the source of
@@ -151,14 +178,21 @@ final class PostCommentsViewModel {
     @discardableResult
     func send(rawBody: String, mentions: [UUID: String]) async -> Bool {
         guard !isSending else { return false }
-        let cleanBody = Self.sanitizer.sanitize(rawBody, allowNewlines: true, maxLength: Self.bodyLimit)
+        // `maxLength: .max` performs the same whitespace-collapsing/control-char stripping as the
+        // real clamp below without truncating — `ProfileTextSanitizer.clean` only truncates when
+        // the trimmed length exceeds `maxLength`, so this is the full, untruncated cleaned text.
+        let uncappedBody = Self.sanitizer.sanitize(rawBody, allowNewlines: true, maxLength: .max)
+        guard !uncappedBody.isEmpty else { return false }
+        // Mirrors `ProfileTextSanitizer.clean`'s own final step: trim after the length clamp too,
+        // in case the cut lands right after a space.
+        let cleanBody = String(uncappedBody.prefix(Self.bodyLimit)).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanBody.isEmpty else { return false }
 
         isSending = true
         sendError = nil
         defer { isSending = false }
 
-        let mentionIDs = MentionScanner.stillPresent(mentions: mentions, in: cleanBody)
+        let mentionIDs = MentionScanner.stillPresent(mentions: mentions, in: uncappedBody)
         do {
             let commentID = try await addCommentRequest(postID, cleanBody, mentionIDs)
             // `add_comment` only returns the new id (see `RPCContracts.CreatedCommentDTO`), not a
@@ -174,8 +208,11 @@ final class PostCommentsViewModel {
                 body: cleanBody,
                 createdAtRaw: Self.timestampStyle.format(Date()),
                 mentionedUserIds: mentionIDs)
+            // Appended to `comments` for immediate display only — `pagingCursor` is deliberately
+            // untouched by this (see its doc), so this echo can never affect what `loadMore()`
+            // asks the server for next.
             comments.append(newComment)
-            onCommentCountChanged(comments.count)
+            onCommentCountChanged(1)
             return true
         } catch let error as SupabaseError {
             sendError = error.friendlyMessage
@@ -195,7 +232,7 @@ final class PostCommentsViewModel {
         do {
             try await deleteCommentRequest(comment.id)
             comments.removeAll { $0.id == comment.id }
-            onCommentCountChanged(comments.count)
+            onCommentCountChanged(-1)
         } catch let error as SupabaseError {
             sendError = error.friendlyMessage
         } catch {
