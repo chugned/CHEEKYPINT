@@ -2,10 +2,10 @@ import SwiftUI
 import PhotosUI
 import CheekyPintCore
 
-/// The composer for a new feed post: body text, an optional photo, and (stubbed here — see
-/// `placeSection`'s doc) a place tag. Mirrors `LogPintSheet`'s shape — plain `@State`, no view
-/// model, inline error `Text`, an `isPosting` overlay, dismiss-then-callback — since there's no
-/// paging/reconciliation state here that would justify one.
+/// The composer for a new feed post: body text, an optional photo, and an optional place tag
+/// (`PlacePickerSheet`, wired in via `placeSection`). Mirrors `LogPintSheet`'s shape — plain
+/// `@State`, no view model, inline error `Text`, an `isPosting` overlay, dismiss-then-callback —
+/// since there's no paging/reconciliation state here that would justify one.
 struct ComposePostSheet: View {
     /// Mirrors `create_post`'s `left(v_body, 500)` clamp (`20260811000500_rpc_feed_posts.sql`).
     static let bodyLimit = 500
@@ -55,6 +55,8 @@ struct ComposePostSheet: View {
     @State private var photoJPEG: Data?
     @State private var isPosting = false
     @State private var errorMessage: String?
+    @State private var selectedPlace: SelectedPlace?
+    @State private var showingPlacePicker = false
 
     private let sanitizer = ProfileTextSanitizer()
 
@@ -137,28 +139,38 @@ struct ComposePostSheet: View {
         }
     }
 
-    /// STUB for this task. Task 3 builds `PlacePickerSheet` (an `MKLocalSearchCompleter` search
-    /// plus `PubsRepository.persist` for a matched pub) and wires it to this row so it shows the
-    /// selected label instead of "Add a location" and opens the picker on tap. Shipping it
-    /// disabled here is deliberate — not an omission — so the rest of the composer (body, photo,
-    /// limits, upload-then-createPost ordering) can land and be reviewed on its own.
+    /// Opens `PlacePickerSheet` (an `MKLocalSearchCompleter` search plus `PubsRepository.persist`
+    /// for a matched pub) and shows the chosen label with a "Remove" affordance once set. No
+    /// location permission is ever requested — see `PlacePickerSheet`'s doc.
     private var placeSection: some View {
         Section {
             Button {
-                // No-op until Task 3 wires PlacePickerSheet here.
+                showingPlacePicker = true
             } label: {
                 HStack {
                     Image(systemName: "mappin.and.ellipse")
-                    Text("Add a location")
+                    Text(selectedPlace?.label ?? "Add a location")
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
                 }
             }
-            .disabled(true)
-            .foregroundStyle(Theme.Palette.textSecondary)
+            .foregroundStyle(selectedPlace == nil ? Theme.Palette.textSecondary : Theme.Palette.textPrimary)
             .accessibilityIdentifier("compose-post-place")
-            .accessibilityLabel("Add a location")
-            .accessibilityHint("Coming soon")
+            .accessibilityLabel(selectedPlace?.label ?? "Add a location")
+            if selectedPlace != nil {
+                Button(role: .destructive) {
+                    selectedPlace = nil
+                } label: {
+                    Text("Remove location")
+                }
+                .accessibilityIdentifier("compose-post-remove-place")
+                .accessibilityLabel("Remove location")
+            }
+        }
+        .sheet(isPresented: $showingPlacePicker) {
+            PlacePickerSheet { place in
+                selectedPlace = place
+            }
         }
     }
 
@@ -221,8 +233,8 @@ struct ComposePostSheet: View {
             try await container.feed.createPost(
                 body: cleanBody.isEmpty ? nil : cleanBody,
                 imagePath: imagePath,
-                placeLabel: nil, // Task 3 wires the place picker; see placeSection's doc.
-                pubID: nil
+                placeLabel: selectedPlace?.label,
+                pubID: selectedPlace?.pubID
             )
             dismiss()
             await onPosted()
