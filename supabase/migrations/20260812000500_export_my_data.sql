@@ -278,6 +278,13 @@ begin
   -- still belongs to its reporter and still exports: nothing here filters on the subject, only on
   -- reporter_id. Asserted in the suite, because the omission of reported_user_id means the
   -- pre-existing assertions cannot tell a retained report from an ordinary one.
+  --
+  -- The mirror case needs no handling and must not get any: once the CALLER's own account is deleted,
+  -- reporter_id is NULL and `r.reporter_id = v_uid` matches nothing. There is no caller left to
+  -- export to (auth.uid() belongs to a deleted auth user), and the row's `details` — the only part
+  -- the departed reporter wrote — has been erased with them. `reporter_key` is deliberately not
+  -- exported either: while the caller still exists it is a derived duplicate of their own id, adding
+  -- nothing to an export that already names them.
   select count(*) into v_total from public.reports r where r.reporter_id = v_uid;
   if v_total > v_cap then v_truncated := true; end if;
   select coalesce(jsonb_agg(jsonb_build_object(

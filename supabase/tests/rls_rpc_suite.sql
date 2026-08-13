@@ -1721,7 +1721,10 @@ end $$;
 --   Rhian  …f1  reporter, survives
 --   Sion   …f2  reported, DELETED in t61
 --   Teilo  …f3  reported, survives (control: a different subject must get a different key)
---   Una    …f4  second reporter about Sion (control: same subject must get the SAME key)
+--   Una    …f4  second reporter about Sion, and herself reported — DELETED in t63 (both roles at once)
+--   Vaughn …f5  reporter, DELETED in t64 (reporter de-linking + details erasure)
+--   Wyn    …f6  reported by Vaughn, DELETED in t64c (making a FULLY de-linked report — no reporter,
+--               no subject — which is the row that must not become an immortal orphan)
 reset role;
 do $$ begin
   insert into auth.users (instance_id, id, aud, role, email, created_at, updated_at)
@@ -1733,18 +1736,24 @@ do $$ begin
     ('00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-0000000000f3',
      'authenticated', 'authenticated', 'teilo@cheekypint.test', now(), now()),
     ('00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-0000000000f4',
-     'authenticated', 'authenticated', 'una@cheekypint.test', now(), now())
+     'authenticated', 'authenticated', 'una@cheekypint.test', now(), now()),
+    ('00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-0000000000f5',
+     'authenticated', 'authenticated', 'vaughn@cheekypint.test', now(), now()),
+    ('00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-0000000000f6',
+     'authenticated', 'authenticated', 'wyn@cheekypint.test', now(), now())
   on conflict (id) do nothing;
 
-  -- Rhian and Sion must be accepted friends so Rhian can see (and therefore report) Sion's post.
-  -- Inserted directly as the owner: this is fixture plumbing, not the behaviour under test, and the
-  -- friend-request RPCs are already exercised at length earlier in the suite.
+  -- Rhian/Sion and Vaughn/Wyn must be accepted friends so each reporter can see (and therefore
+  -- report) the other's post. Inserted directly as the owner: this is fixture plumbing, not the
+  -- behaviour under test, and the friend-request RPCs are already exercised at length earlier.
   insert into public.friendships (requester_id, addressee_id, status, responded_at)
   values ('00000000-0000-4000-8000-0000000000f1', '00000000-0000-4000-8000-0000000000f2',
+          'accepted', now()),
+         ('00000000-0000-4000-8000-0000000000f5', '00000000-0000-4000-8000-0000000000f6',
           'accepted', now())
   on conflict do nothing;
 
-  raise notice 'PASS t56 setup: four throwaway moderation fixtures created (Rhian, Sion, Teilo, Una)';
+  raise notice 'PASS t56 setup: six throwaway moderation fixtures created (Rhian, Sion, Teilo, Una, Vaughn, Wyn)';
 end $$;
 
 -- t56: the pseudonymous subject key is stamped on every report at INSERT time, is stable per
@@ -1788,9 +1797,9 @@ begin
     raise exception 'FAIL t56: same subject got keys % and % from two reporters',
                     quote_literal(v_key_sion), quote_literal(v_key_sion2); end if;
 
-  -- A brand-new report must still name a live account. Asserted on the exact message, not merely
-  -- "some error": a NOT NULL violation on reported_user_key would also be "some error" and would
-  -- mean the guard itself had been deleted.
+  -- A brand-new report must still name a live account on BOTH sides. Asserted on the exact messages,
+  -- not merely "some error": a NOT NULL violation on either key column would also be "some error" and
+  -- would mean the guard itself had been deleted.
   reset role;
   v_state := 'NO ERROR'; v_msg := null;
   begin
@@ -1803,7 +1812,73 @@ begin
   if v_msg is distinct from 'A report must name the account it is about' then
     raise exception 'FAIL t56: subject-less insert message % (want the explicit guard)', quote_literal(v_msg); end if;
 
-  raise notice 'PASS t56: reported_user_key is stamped at insert, stable per subject, distinct across subjects; a new report must still name an account';
+  v_state := 'NO ERROR'; v_msg := null;
+  begin
+    insert into public.reports (reporter_id, reported_user_id, category)
+    values (null, '00000000-0000-4000-8000-0000000000f1', 'other');
+  exception when others then v_state := sqlstate; v_msg := sqlerrm;
+  end;
+  if v_state is distinct from '23502' then
+    raise exception 'FAIL t56: reporter-less insert gave sqlstate % (want 23502)', v_state; end if;
+  if v_msg is distinct from 'A report must name the account that filed it' then
+    raise exception 'FAIL t56: reporter-less insert message % (want the explicit guard)', quote_literal(v_msg); end if;
+
+  raise notice 'PASS t56: reported_user_key is stamped at insert, stable per subject, distinct across subjects; a new report must still name an account on both sides';
+end $$;
+
+-- t56b: the REPORTER key, and the namespace decision that keeps the two roles apart.
+--
+-- The last two assertions are the ones that matter and are easy to lose by omission: the reporter key
+-- and the subject key for the SAME account must be DIFFERENT values. If they shared a namespace, any
+-- two rows could be joined reporter-to-subject to learn "the person who filed A is the person B is
+-- about" — across the whole retained corpus, with no account id in hand — a re-identification path
+-- across a table whose entire purpose after de-linking is to hold no live reference to a person.
+-- Nothing behavioural anywhere else in this suite would notice the two namespaces collapsing into one.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000f5';
+do $$
+declare v jsonb; v_key_v text; v_key_v2 text; v_key_r text; begin
+  select public.report_user('00000000-0000-4000-8000-0000000000f3', 'other',
+                            't56b: vaughn reports teilo') into v;
+  select reporter_key into v_key_v from public.reports where id = (v->>'report_id')::uuid;
+
+  if v_key_v is distinct from public.report_reporter_key('00000000-0000-4000-8000-0000000000f5') then
+    raise exception 'FAIL t56b: stamped reporter_key % does not match report_reporter_key %',
+      quote_literal(v_key_v),
+      quote_literal(public.report_reporter_key('00000000-0000-4000-8000-0000000000f5')); end if;
+  if v_key_v !~ '^[0-9a-f]{64}$' then
+    raise exception 'FAIL t56b: reporter_key % is not a 64-char hex digest', quote_literal(v_key_v); end if;
+
+  -- Stable across the same reporter's other reports.
+  select public.report_user('00000000-0000-4000-8000-0000000000f3', 'harassment',
+                            't56b: vaughn reports teilo again') into v;
+  select reporter_key into v_key_v2 from public.reports where id = (v->>'report_id')::uuid;
+  if v_key_v2 is distinct from v_key_v then
+    raise exception 'FAIL t56b: one reporter got two keys, % and %',
+      quote_literal(v_key_v), quote_literal(v_key_v2); end if;
+
+  -- Distinct across reporters.
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000f1', false);
+  select public.report_user('00000000-0000-4000-8000-0000000000f3', 'other',
+                            't56b: rhian reports teilo for the reporter-key check') into v;
+  select reporter_key into v_key_r from public.reports where id = (v->>'report_id')::uuid;
+  if v_key_r = v_key_v then
+    raise exception 'FAIL t56b: two different reporters share the key %', quote_literal(v_key_v); end if;
+
+  -- THE NAMESPACE DECISION: same account, two roles, two different keys.
+  if public.report_reporter_key('00000000-0000-4000-8000-0000000000f5')
+     = public.report_subject_key('00000000-0000-4000-8000-0000000000f5') then
+    raise exception 'FAIL t56b: reporter and subject keys collide for one account — the two roles could then be joined across every de-linked row'; end if;
+
+  -- ...and no such collision exists in the STORED data either, not merely in the functions. Vaughn is
+  -- both a reporter (above) and, in t63/t64, a party whose rows persist; Una is a reporter who is
+  -- also reported, so this join has real rows on both sides to find a collision in.
+  reset role;
+  if exists (
+    select 1 from public.reports a join public.reports b on a.reporter_key = b.reported_user_key
+  ) then
+    raise exception 'FAIL t56b: a stored reporter_key equals a stored reported_user_key — cross-role join is possible'; end if;
+
+  raise notice 'PASS t56b: reporter_key is stamped at insert, stable per reporter, distinct across reporters, and in a SEPARATE namespace from the subject key so the two roles cannot be joined';
 end $$;
 
 -- t57: review_report transitions the report and gets reviewed_at right.
@@ -2167,28 +2242,67 @@ begin
   if v_post_link is not null then
     raise exception 'FAIL t61: retained content report still points at a deleted post (%)', v_post_link; end if;
 
-  -- 4. The asymmetry the operator has NOT decided on: reports Sion FILED are gone.
-  if exists (select 1 from public.reports where reporter_id = '00000000-0000-4000-8000-0000000000f2') then
-    raise exception 'FAIL t61: reporter_id no longer cascades — that is a separate operator decision, not part of this change'; end if;
-  if exists (select 1 from public.reports where details = 't61: sion reports teilo — filed BY the departing user') then
-    raise exception 'FAIL t61: a report filed by the departing user survived, which reporter_id''s cascade should have removed'; end if;
+  -- 4. Sion was ALSO a reporter, so his deletion exercises the reporter side at the same time. The
+  -- report he FILED about Teilo survives, de-linked, with his own free text erased.
+  --
+  -- Rewritten when reporter_id became `on delete set null`: the previous version asserted
+  -- `not exists (… where reporter_id = sion)` and `not exists (… where details = '<his text>')`, and
+  -- BOTH of those now pass VACUOUSLY — the first because reporter_id is NULL rather than his id, the
+  -- second because the details it looked for is exactly what gets erased. Two green assertions
+  -- asserting nothing. They are replaced with identity-based ones: the row is found by the reporter
+  -- key, which is the only durable handle on it.
+  if not exists (
+    select 1 from public.reports
+     where reporter_key = public.report_reporter_key('00000000-0000-4000-8000-0000000000f2')
+  ) then
+    raise exception 'FAIL t61: the report Sion FILED was destroyed by his deletion — reporter_id must de-link, not cascade'; end if;
+  if exists (
+    select 1 from public.reports
+     where reporter_key = public.report_reporter_key('00000000-0000-4000-8000-0000000000f2')
+       and reporter_id is not null
+  ) then
+    raise exception 'FAIL t61: a report Sion filed still points at him'; end if;
+  if exists (
+    select 1 from public.reports
+     where reporter_key = public.report_reporter_key('00000000-0000-4000-8000-0000000000f2')
+       and details is not null
+  ) then
+    raise exception 'FAIL t61: the departing reporter''s free-text details survived his deletion'; end if;
+  -- The rest of that row is intact — it still records that a complaint of this category was made
+  -- about Teilo on this date, which is the signal the retention exists to keep.
+  if not exists (
+    select 1 from public.reports
+     where reporter_key = public.report_reporter_key('00000000-0000-4000-8000-0000000000f2')
+       and reported_user_id = '00000000-0000-4000-8000-0000000000f3'
+       and category = 'underage_concern'
+  ) then
+    raise exception 'FAIL t61: the report Sion filed lost its subject or category along with his details'; end if;
 
-  raise notice 'PASS t61: deleting the reported account de-links the report and keeps category, details, timestamps and the pseudonymous key — for account AND content reports; reports the departing user FILED still cascade away';
+  raise notice 'PASS t61: deleting an account de-links reports on BOTH sides at once — reports about him keep their details, the report he filed keeps its category, subject and dates but loses his free text';
 end $$;
 
--- t61b: report_not_self still constrains after reported_user_id became nullable, and is stated in
--- the NULL-safe form.
+-- t61b: report_not_self still constrains, now that BOTH sides are nullable.
 --
--- Two separate assertions because they catch different regressions. The behavioural one catches the
--- constraint being dropped or loosened while making the column nullable — the reachable failure. The
--- catalog one pins `is distinct from` specifically, which is NOT behaviourally reachable today:
--- reporter_id is still `not null`, so `reporter_id <> reported_user_id` can only be NULL on a row
--- where reported_user_id is NULL, and both forms admit that row. The NULL-safe form matters the
--- moment reporter_id is given the same `set null` treatment, and pinning it in the catalog is the
--- only honest way to test a property that has no reachable behaviour yet. See the constraint's own
--- comment for the extra change that becomes necessary at that point.
+-- The catalog assertion that used to live here — "the definition must contain `is distinct from`" —
+-- has been DELETED, deliberately, and the reasoning is worth keeping because it inverted:
+--
+--   * While reporter_id was `not null`, `is distinct from` was the safe form and the property had no
+--     reachable behaviour, so a catalog check was the only honest test available.
+--   * Now that reporter_id is nullable, `is distinct from` is the WRONG form: a row that has lost both
+--     parties evaluates `null is distinct from null` = FALSE, and the constraint would block the
+--     second de-link, i.e. account deletion would start failing. So the old assertion would now
+--     demand the broken form.
+--   * And the property is finally behaviourally reachable: t64c deletes both parties of one report,
+--     which is exactly the second de-link that `is distinct from` would refuse. A real test replaced
+--     the catalog check rather than being added alongside it.
+--
+-- What is left here is the half that IS reachable independently: the constraint still rejects a
+-- self-report. Note that a bare `reporter_id <> reported_user_id` would pass both this assertion and
+-- t64c's, because with two non-null ids it is equivalent and with either id NULL it yields NULL
+-- (satisfied) — the explicit three-way form is chosen for totality, not for a behavioural difference,
+-- and asserting on a form with no behavioural consequence is the kind of tautology this suite avoids.
 reset role;
-do $$ declare v_state text; v_def text; begin
+do $$ declare v_state text; begin
   v_state := 'NO ERROR';
   begin
     insert into public.reports (reporter_id, reported_user_id, category)
@@ -2197,13 +2311,12 @@ do $$ declare v_state text; v_def text; begin
   if v_state is distinct from '23514' then
     raise exception 'FAIL t61b: a self-report insert gave sqlstate % (want 23514 check_violation)', v_state; end if;
 
-  select pg_get_constraintdef(oid) into v_def from pg_constraint
-   where conrelid = 'public.reports'::regclass and conname = 'report_not_self';
-  if v_def is null then raise exception 'FAIL t61b: report_not_self does not exist'; end if;
-  if v_def !~* 'is distinct from' then
-    raise exception 'FAIL t61b: report_not_self is % — a bare <> evaluates to NULL (satisfied) once either side is nullable', v_def; end if;
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.reports'::regclass and conname = 'report_not_self'
+  ) then raise exception 'FAIL t61b: report_not_self does not exist'; end if;
 
-  raise notice 'PASS t61b: report_not_self still rejects a self-report with reported_user_id nullable, and is stated NULL-safely';
+  raise notice 'PASS t61b: report_not_self still rejects a self-report with both party columns nullable';
 end $$;
 
 -- t61c: a retained report with a NULL subject still exports for its reporter (Art. 15).
@@ -2310,8 +2423,9 @@ end $$;
 
 reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000f4';
 do $$
-declare v_filed int; v_about int; v_key text; v_subject uuid; begin
-  v_key := public.report_subject_key('00000000-0000-4000-8000-0000000000f4');
+declare v_filed int; v_about int; v_key text; v_rkey text; v_subject uuid; begin
+  v_key  := public.report_subject_key('00000000-0000-4000-8000-0000000000f4');
+  v_rkey := public.report_reporter_key('00000000-0000-4000-8000-0000000000f4');
 
   reset role;
   select count(*) into v_filed from public.reports
@@ -2337,16 +2451,226 @@ declare v_filed int; v_about int; v_key text; v_subject uuid; begin
 
   if exists (select 1 from public.profiles where id = '00000000-0000-4000-8000-0000000000f4') then
     raise exception 'FAIL t63: the profile survived the auth.users delete'; end if;
-  if exists (select 1 from public.reports where reporter_id = '00000000-0000-4000-8000-0000000000f4') then
-    raise exception 'FAIL t63: reports Una filed survived (reporter_id must still cascade)'; end if;
+
+  -- Both FK actions fired against her in that one statement, and both sides must have retained.
+  -- Rewritten when reporter_id became `on delete set null`: the previous version asserted
+  -- `not exists (… where reporter_id = una)`, which now passes VACUOUSLY — reporter_id is NULL rather
+  -- than her id, so the predicate matches nothing whether the rows survived or not.
+  if (select count(*) from public.reports where reporter_key = v_rkey) is distinct from v_filed then
+    raise exception 'FAIL t63: % of % reports Una FILED survived',
+      (select count(*) from public.reports where reporter_key = v_rkey), v_filed; end if;
+  if exists (select 1 from public.reports where reporter_key = v_rkey and reporter_id is not null) then
+    raise exception 'FAIL t63: a report Una filed still points at her'; end if;
+  if exists (select 1 from public.reports where reporter_key = v_rkey and details is not null) then
+    raise exception 'FAIL t63: Una''s own free text survived her deletion'; end if;
+
   if (select count(*) from public.reports where reported_user_key = v_key) is distinct from v_about then
     raise exception 'FAIL t63: reports about Una were destroyed (% of % kept)',
       (select count(*) from public.reports where reported_user_key = v_key), v_about; end if;
   select reported_user_id into v_subject from public.reports where reported_user_key = v_key limit 1;
   if v_subject is not null then
     raise exception 'FAIL t63: a retained report about Una still points at her (%)', v_subject; end if;
+  -- The asymmetry, on one account, in one statement: the report ABOUT her keeps the text ANOTHER
+  -- person wrote (that is the Art. 17(3)(e) evidence), while the report SHE filed loses hers.
+  if not exists (
+    select 1 from public.reports where reported_user_key = v_key and details is not null
+  ) then
+    raise exception 'FAIL t63: a report about Una lost the details its own reporter wrote — only the DEPARTING party''s text should be erased'; end if;
 
-  raise notice 'PASS t63: delete_account() then the auth.users delete both succeed for a user on both sides of the queue — her filed reports cascade away, reports about her are retained and de-linked';
+  raise notice 'PASS t63: delete_account() then the auth.users delete both succeed for a user on both sides of the queue — reports she filed are retained minus her free text, reports about her are retained WITH their reporter''s text';
+end $$;
+
+-- ============================ REPORTER DE-LINKING (operator decision 2026-08-13b) ============================
+-- Vaughn files two reports — one about Teilo's ACCOUNT (details is the only evidence it will ever
+-- have) and one about Wyn's POST (where post_id still points at the actual evidence). Both keep their
+-- free text until he leaves.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000f6';
+do $$ declare v jsonb; v_post uuid; begin
+  select public.create_post('t64: wyn post that vaughn reports', null, null, null) into v;
+  v_post := (v->>'post_id')::uuid;
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000f5', false);
+  perform public.report_post(v_post, 'inappropriate_post_image',
+                             't64: vaughn reports wyn''s post — content report, evidence is the post');
+  perform public.report_user('00000000-0000-4000-8000-0000000000f3', 'harassment',
+                             't64: vaughn reports teilo''s account — free text is the ONLY evidence');
+  raise notice 'PASS t64 setup: Vaughn files one content report and one account report, both with details';
+end $$;
+
+-- t64a: the CHECK, not the trigger, is what guarantees the erasure.
+--
+-- The comment on reports_erase_reporter_details claims that if the trigger stops firing, the FK's own
+-- set-null violates report_details_erased_with_reporter and the whole account deletion ABORTS — rather
+-- than silently leaving a de-linked row that kept the departed reporter's prose. That claim is tested
+-- here by actually disabling the trigger and attempting a real account deletion.
+--
+-- This is the one place the suite disables a trigger. It is the only way to reach the state the
+-- constraint exists for: with the trigger working, the constraint can never be violated, so a test of
+-- the constraint alone would be unfalsifiable. The failed delete is caught inside a plpgsql
+-- subtransaction, so it rolls back, and the trigger is re-enabled before anything else runs.
+reset role;
+do $$
+declare v_state text; v_msg text; v_details_before int; begin
+  select count(*) into v_details_before from public.reports
+   where reporter_id = '00000000-0000-4000-8000-0000000000f5' and details is not null;
+  if v_details_before < 2 then
+    raise exception 'FAIL t64a: Vaughn should have 2+ reports with details, has %', v_details_before; end if;
+
+  alter table public.reports disable trigger reports_erase_reporter_details;
+
+  v_state := 'NO ERROR'; v_msg := null;
+  begin
+    delete from auth.users where id = '00000000-0000-4000-8000-0000000000f5';
+  exception when others then v_state := sqlstate; v_msg := sqlerrm;
+  end;
+
+  alter table public.reports enable trigger reports_erase_reporter_details;
+
+  if v_state is distinct from '23514' then
+    raise exception 'FAIL t64a: with the erasing trigger disabled, deleting the reporter gave sqlstate % (want 23514) — the erasure is only enforced by a trigger, so it can fail SILENTLY', v_state; end if;
+  if v_msg not like '%report_details_erased_with_reporter%' then
+    raise exception 'FAIL t64a: the abort did not name report_details_erased_with_reporter: %', quote_literal(v_msg); end if;
+
+  -- Aborted, therefore nothing half-happened: the account is still there and every detail is intact.
+  if not exists (select 1 from public.profiles where id = '00000000-0000-4000-8000-0000000000f5') then
+    raise exception 'FAIL t64a: the account was deleted even though the transaction aborted'; end if;
+  if (select count(*) from public.reports
+       where reporter_id = '00000000-0000-4000-8000-0000000000f5' and details is not null)
+     is distinct from v_details_before then
+    raise exception 'FAIL t64a: a half-erased report survived an aborted deletion'; end if;
+
+  raise notice 'PASS t64a: with the erasing trigger disabled, deleting a reporter ABORTS on report_details_erased_with_reporter and leaves nothing half-erased — the constraint is the guarantee, the trigger only satisfies it';
+end $$;
+
+-- t64: deleting the reporter erases their prose and keeps everything else.
+reset role;
+do $$
+declare
+  v_key text; v_filed int; v_content_post uuid; v_others int;
+begin
+  v_key := public.report_reporter_key('00000000-0000-4000-8000-0000000000f5');
+  select count(*) into v_filed from public.reports
+   where reporter_id = '00000000-0000-4000-8000-0000000000f5';
+  select post_id into v_content_post from public.reports
+   where reporter_id = '00000000-0000-4000-8000-0000000000f5' and post_id is not null;
+  if v_filed < 3 or v_content_post is null then
+    raise exception 'FAIL t64: fixtures missing (filed %, content post %)', v_filed, v_content_post; end if;
+
+  -- Details written by OTHER reporters about the same subject, which must NOT be touched.
+  select count(*) into v_others from public.reports
+   where reported_user_id = '00000000-0000-4000-8000-0000000000f3'
+     and reporter_id = '00000000-0000-4000-8000-0000000000f1' and details is not null;
+  if v_others < 1 then
+    raise exception 'FAIL t64: need at least one other reporter''s detailed report about Teilo as a control'; end if;
+
+  delete from auth.users where id = '00000000-0000-4000-8000-0000000000f5';
+
+  if exists (select 1 from public.profiles where id = '00000000-0000-4000-8000-0000000000f5') then
+    raise exception 'FAIL t64: Vaughn''s profile survived the auth.users delete'; end if;
+
+  -- 1. Every report he filed survives, found by the durable handle.
+  if (select count(*) from public.reports where reporter_key = v_key) is distinct from v_filed then
+    raise exception 'FAIL t64: % of % reports Vaughn filed survived his deletion',
+      (select count(*) from public.reports where reporter_key = v_key), v_filed; end if;
+
+  -- 2. De-linked, and his prose is gone from all of them.
+  if exists (select 1 from public.reports where reporter_key = v_key and reporter_id is not null) then
+    raise exception 'FAIL t64: a report Vaughn filed still points at him'; end if;
+  if exists (select 1 from public.reports where reporter_key = v_key and details is not null) then
+    raise exception 'FAIL t64: the departing reporter''s details survived: %',
+      (select quote_literal(details) from public.reports where reporter_key = v_key and details is not null limit 1); end if;
+
+  -- 3. The signal is intact: category, dates, the still-live subject, and the content link.
+  if not exists (
+    select 1 from public.reports
+     where reporter_key = v_key and reported_user_id = '00000000-0000-4000-8000-0000000000f3'
+       and category = 'harassment' and created_at is not null
+  ) then raise exception 'FAIL t64: the account report lost its subject, category or date with its details'; end if;
+  if not exists (
+    select 1 from public.reports where reporter_key = v_key and post_id = v_content_post
+  ) then
+    raise exception 'FAIL t64: the content report lost its post link — for a content report the post IS the evidence that replaces the erased text'; end if;
+
+  -- 4. No over-erasure: another reporter's text about the same subject is untouched.
+  if (select count(*) from public.reports
+       where reported_user_id = '00000000-0000-4000-8000-0000000000f3'
+         and reporter_id = '00000000-0000-4000-8000-0000000000f1' and details is not null)
+     is distinct from v_others then
+    raise exception 'FAIL t64: erasing one reporter''s details also erased another reporter''s'; end if;
+
+  raise notice 'PASS t64: deleting a reporter de-links their reports and erases their free text, while keeping category, dates, subject and content links — and leaves other reporters'' text alone';
+end $$;
+
+-- t64b: a de-linked report is invisible to every client.
+--
+-- reports_select_own is `reporter_id = auth.uid()`, which yields NULL — not true — once reporter_id is
+-- NULL, so a report with no living reporter is readable by nobody through the app. Asserted rather
+-- than assumed, because the two plausible "tidier" spellings of that policy both leak: `is not
+-- distinct from` hands every de-linked row to any caller whose auth.uid() is NULL, and an added
+-- `or reporter_id is null` branch hands them to EVERY authenticated user.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000f1';
+do $$ declare v_visible int; v_own int; begin
+  select count(*) into v_visible from public.reports where reporter_id is null;
+  if v_visible <> 0 then
+    raise exception 'FAIL t64b: an authenticated caller can see % de-linked reports', v_visible; end if;
+
+  -- ...and the policy still works for rows that DO have a reporter, so this is not "the table went
+  -- dark" passing for "orphans are hidden".
+  select count(*) into v_own from public.reports;
+  if v_own < 1 then
+    raise exception 'FAIL t64b: the caller can no longer see any of their own reports either'; end if;
+  if exists (select 1 from public.reports
+              where reporter_id is distinct from '00000000-0000-4000-8000-0000000000f1') then
+    raise exception 'FAIL t64b: the caller can see a report they did not file'; end if;
+
+  raise notice 'PASS t64b: a de-linked report is invisible to every client, while the reporter still sees their own live reports';
+end $$;
+
+-- t64c: a FULLY de-linked report — no reporter, no subject — is still reachable by the purge.
+--
+-- This row is the one with no living party to trigger any other cleanup, so if the purge missed it, it
+-- would be immortal. Deleting Wyn is also the SECOND de-link of a report whose reporter (Vaughn) has
+-- already gone, which is the behavioural proof for report_not_self's NULL-safe form: with the previous
+-- `is distinct from` spelling, `null is distinct from null` = FALSE and this delete would abort.
+reset role;
+do $$
+declare
+  v_rkey text; v_skey text; v_full uuid; v_recent uuid; purged int; v_reporter uuid; v_subject uuid;
+begin
+  v_rkey := public.report_reporter_key('00000000-0000-4000-8000-0000000000f5');
+  v_skey := public.report_subject_key('00000000-0000-4000-8000-0000000000f6');
+
+  select id into v_full from public.reports
+   where reporter_key = v_rkey and reported_user_key = v_skey;
+  if v_full is null then
+    raise exception 'FAIL t64c: no report by Vaughn about Wyn to fully de-link'; end if;
+
+  -- The second de-link. If report_not_self were `is distinct from`, this raises 23514 and the suite
+  -- fails here rather than at an assertion.
+  delete from auth.users where id = '00000000-0000-4000-8000-0000000000f6';
+
+  select reporter_id, reported_user_id into v_reporter, v_subject
+    from public.reports where id = v_full;
+  if v_reporter is not null or v_subject is not null then
+    raise exception 'FAIL t64c: the report is not fully de-linked (reporter %, subject %)', v_reporter, v_subject; end if;
+  if not exists (select 1 from public.reports where id = v_full) then
+    raise exception 'FAIL t64c: the fully de-linked report was destroyed rather than retained'; end if;
+
+  -- A second fully de-linked row, left recent, as the in-window control.
+  select id into v_recent from public.reports
+   where reporter_key = v_rkey and id <> v_full
+     and reporter_id is null and reported_user_id is null limit 1;
+
+  update public.reports set created_at = now() - interval '25 months' where id = v_full;
+
+  select public.purge_resolved_reports(interval '18 months', interval '24 months') into purged;
+  if purged < 1 then
+    raise exception 'FAIL t64c: the purge removed % rows — a report with neither party left is an immortal orphan', purged; end if;
+  if exists (select 1 from public.reports where id = v_full) then
+    raise exception 'FAIL t64c: a fully de-linked report 25 months old survived the purge'; end if;
+  if v_recent is not null and not exists (select 1 from public.reports where id = v_recent) then
+    raise exception 'FAIL t64c: the purge also took a fully de-linked report still inside its window'; end if;
+
+  raise notice 'PASS t64c: a report with neither party left is retained, de-linked on both sides, and purged 24 months after filing — not immortal, and the second de-link is not blocked by report_not_self';
 end $$;
 
 reset role;

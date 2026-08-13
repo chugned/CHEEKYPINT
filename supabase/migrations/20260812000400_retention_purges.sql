@@ -118,10 +118,20 @@ $$;
 --    counsel sign-off before launch — the relevant limitation periods for the claims this retention
 --    is meant to defend are a lawyer's question, not a schema author's.
 --
--- Not covered, on purpose: reports about a LIVE account that were never resolved. They remain
--- unbounded (docs/DPIA.md §3.8 already records this). Bounding them is a separate operator
--- decision, because the fix for a never-triaged report about a live account is to triage it, and a
--- purge would quietly destroy an open safety report rather than surface it.
+--    Branch 2 keys on `reported_user_id is null`, so it covers the FULLY de-linked row — no reporter
+--    and no subject — as well as the subject-only case. That matters since reporter_id also became
+--    `on delete set null` (20260101000300_social_tables.sql): a report both of whose parties have
+--    left, and which nobody ever reviewed, is the one row with no living party to trigger any other
+--    cleanup, and it must not become an immortal orphan. Asserted in the suite.
+--
+-- Not covered, on purpose: reports about a LIVE account that were never resolved — whether or not
+-- their REPORTER has since left. They remain unbounded (docs/DPIA.md §3.8 records this as a choice).
+-- The reasoning is the same in both shapes: the fix for a never-triaged report about a live account
+-- is to triage it, and a purge would quietly destroy an open safety report rather than surface it.
+-- A reporter having departed does not make the complaint about a live account less worth reading —
+-- it makes it harder to follow up, which is an argument for triaging sooner, not for deleting. Note
+-- the consequence honestly: such a row keeps its category, dates and content links indefinitely,
+-- though its `details` has already been erased with its reporter.
 create or replace function public.purge_resolved_reports(
   p_older_than interval default interval '18 months',
   p_retained_older_than interval default interval '24 months'

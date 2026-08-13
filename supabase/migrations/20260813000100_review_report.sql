@@ -116,7 +116,10 @@ revoke all on function public.review_report(uuid, public.report_status) from pub
 grant execute on function public.review_report(uuid, public.report_status) to service_role;
 
 -- 20260101000900_grants.sql:7 grants EXECUTE on every function in `public` to `authenticated`, which
--- swept up the trigger function added with the reports table in 20260101000300_social_tables.sql.
+-- swept up both trigger functions added with the reports table in 20260101000300_social_tables.sql.
 -- Same treatment as set_updated_at and handle_new_user there. (Triggers do not re-check EXECUTE when
--- they fire, so this changes nothing about stamping; it keeps the callable surface honest.)
-revoke execute on function public.reports_stamp_subject_key() from authenticated;
+-- they fire, so this changes nothing about stamping or erasing; it keeps the callable surface honest.
+-- The three report_*_key functions are deliberately NOT revoked — see the note above them in
+-- 20260101000300: the derivation is public and unsalted, so revoking would protect nothing.)
+revoke execute on function public.reports_stamp_party_keys() from authenticated;
+revoke execute on function public.reports_erase_reporter_details() from authenticated;

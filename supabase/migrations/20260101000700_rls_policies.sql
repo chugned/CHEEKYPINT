@@ -69,6 +69,18 @@ create policy blocks_select_own on public.blocks
   for select to authenticated using (blocker_id = auth.uid());
 
 -- reports -------------------------------------------------------------------------------
+-- SELECT only, and only your own filed reports. There is no INSERT/UPDATE/DELETE policy, so writes
+-- go through the report_* RPCs and transitions through public.review_report (service role) —
+-- `authenticated` holding table DML in some environments is not enough to touch a row.
+--
+-- `reporter_id = auth.uid()` is deliberately NOT null-safe, and that is the correct behaviour here:
+-- once a reporter's account is deleted the column is NULL (20260101000300_social_tables.sql),
+-- `NULL = auth.uid()` is NULL rather than true, and the de-linked row becomes invisible to every
+-- client. That is what we want — the row has no owner left, so nobody may read it through the app;
+-- it exists only for the operator, who reads it in the dashboard as project owner. Writing this
+-- `is not distinct from` instead would hand every de-linked report to any caller whose auth.uid() is
+-- NULL, and adding an `or reporter_id is null` branch would hand them to EVERY authenticated user.
+-- Asserted in the RLS/RPC suite.
 alter table public.reports enable row level security;
 
 create policy reports_select_own on public.reports
