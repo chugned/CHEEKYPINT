@@ -15,12 +15,31 @@
       - `purge_soft_deleted_posts` — daily
       - `purge_soft_deleted_comments` — daily
       - `purge_soft_deleted_pint_entries` — daily
-      - `purge_resolved_reports` — weekly (defaults to an 18-month retention, the mid-point of
-        the published 12–24 month window)
+      - `purge_resolved_reports` — weekly. Two clocks, both defaulted: 18 months after
+        `reviewed_at` for resolved reports (the mid-point of the published 12–24 month window), and
+        24 months after `created_at` for reports retained past deletion of their subject and never
+        resolved. Call it with no arguments to take both defaults. **Both numbers need counsel
+        sign-off** (`docs/legal/DATA_RETENTION_POLICY.md`)
       - `storage-gc` Edge Function (drains `storage_gc_queue`) — hourly
 - [ ] Verify RLS suite against a staging DB: `supabase/tests/run_local_pg.sh`
 - [ ] Monitor `storage_gc_queue` for rows with `attempts > 3` or a non-null `last_error` — a stuck
       drain (e.g. a rotated service-role key) is otherwise invisible
+
+## Moderation
+
+- [ ] Read [MODERATION_PROCESS.md](MODERATION_PROCESS.md) — the runbook for `public.reports`: what
+      each status means, the SQL to transition a report (`public.review_report`) and to enforce a
+      takedown, per-category handling, and how the queue satisfies App Store Review guideline 1.2's
+      "timely response" limb. Without a person working that queue, the reporting mechanism is a
+      write-only inbox and 1.2 is not met
+- [ ] Commit to the triage target in its §9 (queue checked every 48 hours; same day for
+      `underage_concern` and `impersonation`) or change the number in that document to one that will
+      actually be met. It is deliberately not published to users as a promise
+- [ ] Replace the `support@cheekypint.app` placeholder with a live, monitored address — guideline 1.2
+      requires published contact information
+- [ ] Decide the open question in its §8: whether reports **filed by** a user should survive that
+      user deleting their account. Today they do not (`reports.reporter_id` still cascades), so an
+      open report about a third party disappears when its reporter leaves
 
 ## App configuration
 

@@ -81,7 +81,7 @@ This requires qualified Austrian legal advice. See [DPIA.md](DPIA.md) §3.1.
 |----------|---------------------------|-------|
 | **Registered adult users** who have self-declared they meet their local legal drinking age | Sign-up creates `auth.users` → `profiles` + `privacy_settings` (`supabase/migrations/20260101000650_auth_bootstrap.sql:15-24`) | The declaration is a self-set timestamp with no verification (`CheekyPint/Core/Database/ProfileRepository.swift:80-83`). A user who is in fact under age is therefore a foreseeable data subject, and `report_category` includes `underage_concern` for exactly that case (`supabase/migrations/20260101000100_extensions_and_enums.sql:32`) |
 | **Users referenced in another user's data** | As `friendships.requester_id`/`addressee_id`, `blocks.blocked_id`, `comment_mentions.mentioned_user_id`, `nudges.recipient_id`, `session_members.user_id`, `clink_participants.user_id`, `reports.reported_user_id` | These identifiers appear inside another user's records and, for `blocks` and `reports`, are created without the referenced person's knowledge |
-| **Reported users** | `reports.reported_user_id`, `not null` on every row (`supabase/migrations/20260101000300_social_tables.sql:55`) | Accompanied by up to 1,000 characters of free text written by the reporter (`…000300:57`) |
+| **Reported users** | `reports.reported_user_id` (required when a report is filed; de-linked to NULL if that account is later deleted) and `reports.reported_user_key`, a pseudonym for the subject that survives deletion (`supabase/migrations/20260101000300_social_tables.sql`) | Accompanied by up to 1,000 characters of free text written by the reporter. A report about a person is retained after that person erases their account — see §4.10 and §7 |
 | **Non-users depicted in photographs** | Uploaded avatar or post-photo bytes; bystanders in a pub photo. Nothing in the schema records them and no consent mechanism exists | The only categories of data subject for whom the system provides **no** rights mechanism at all — they cannot be identified, notified, or served an access or erasure request. See [DPIA.md](DPIA.md) §3.2 |
 | **Pub-suggestion authors** | `pubs.created_by` (`supabase/migrations/20260101000400_pub_tables.sql:18`) | Retained after account deletion as `null` (`on delete set null`), i.e. de-linked rather than deleted |
 | **Deleted-account users** | `profiles.deleted_at` set and identifying fields nulled (`supabase/migrations/20260101000850_rpc_pints_sessions.sql:265-273`) | Residues in `storage_gc_queue.object_path` (§4.11) and in backups |
@@ -199,13 +199,30 @@ All four have RLS enabled with **no policies** and all privileges revoked from
 
 ### 4.10 Moderation data — `public.reports` (`…000300_social_tables.sql:52-62` + `…20260811000400_feed_reports.sql:3-5`)
 
-`id`, `reporter_id`, `reported_user_id` (`not null`), `category` (`inappropriate_profile_image`,
+`id`, `reporter_id`, `reported_user_id` (required at insert, nullable thereafter — see below),
+`reported_user_key` (`not null`), `category` (`inappropriate_profile_image`,
 `inappropriate_text`, `harassment`, `impersonation`, `underage_concern`, `other`,
 `inappropriate_post_image` — `…000100_extensions_and_enums.sql:27-34`,
 `…20260811000300_report_category_post_image.sql:4`), `details` (≤1000 chars of reporter-written
 free text about a third party), `status` (`open`/`reviewing`/`actioned`/`dismissed`), `created_at`,
-`reviewed_at`, `post_id`, `comment_id` (at most one of the two — `…20260811000400:10-12`). The
+`reviewed_at`, `post_id`, `comment_id` (at most one of the two — `…20260811000400`). The
 reporter can read their own reports (`…000700:74-75`); the reported person cannot.
+
+`reported_user_key` is a sha256 digest over a domain-separated string containing the reported
+account's id, stamped at insert and never rewritten. **Purpose:** a report survives deletion of the
+account it concerns — `reported_user_id`, `post_id` and `comment_id` are all `on delete set null` —
+and the key is what still allows reports about one former account to be grouped, on the Art. 17(3)(e)
+basis recorded in [DPIA.md](DPIA.md) §3.7. **Limits, stated because they are easy to overstate:** the
+key is pseudonymisation under Art. 4(5), not anonymisation — the retained row remains personal data
+with a retention clock (§7) — and it **cannot** link a person to a new account, because a new
+registration has a new account id and therefore an unrelated key. No cross-account identification is
+performed or intended. The operational detail is in
+[MODERATION_PROCESS.md](MODERATION_PROCESS.md) §6.
+
+`status` and `reviewed_at` are written only by `public.review_report`
+(`…20260813000100_review_report.sql`), which is revoked from `public`/`anon`/`authenticated` and
+granted to `service_role`. `report_reviewed_at_matches_status` constrains the pair so a resolved
+report always carries the review timestamp the retention purge keys off.
 
 ### 4.11 Operational and security data
 
@@ -297,9 +314,11 @@ category, the function that actually enforces it.
 | Post photo objects | Removed when the post is purged | Two-step: `delete_post` enqueues the path at soft-delete time (`…20260812000300_enqueue_deleted_post_images.sql:44-48`) and `purge_soft_deleted_posts` enqueues at purge time (`…000400:33-37`); the `storage-gc` Edge Function drains the queue and is the only thing that deletes the bytes (`supabase/functions/storage-gc/index.ts:57-100`) | **No — `storage-gc` is unscheduled** |
 | Comments | Soft-deleted by author; purged within 30 days | `purge_soft_deleted_comments(interval '30 days')` (`…000400:51-71`) | **No — unscheduled** |
 | Comments and cheers **by other users** on a purged post | Removed with the post | FK cascade from `posts` (`…20260811000100_feed_tables.sql:59,70`), documented deliberately at `…20260812000400:9-18` | Follows the (unscheduled) post purge |
-| Reports, resolved | 12–24 months after resolution | `purge_resolved_reports(interval '18 months')` (`…000400:95-114`) | **No — unscheduled** |
-| Reports, unresolved (`open`, `reviewing`) | Not published | **None.** The purge matches only `status in ('actioned','dismissed')` with a non-null `reviewed_at` (`…000400:106-107`), so a never-triaged report is retained indefinitely | No limit exists |
-| Reports involving a deleted account | "May be retained" (`docs/legal/ACCOUNT_DELETION_POLICY.md:29`) | **Contradicted by the schema:** both `reporter_id` and `reported_user_id` are `on delete cascade` to `profiles` (`…000300_social_tables.sql:54-55`), which cascades from `auth.users` (`…000200_core_tables.sql:7`), so deleting an account destroys every report filed by *or about* that user. See §9.9 | Immediate deletion, not retention |
+| Reports, resolved | 12–24 months after resolution | `purge_resolved_reports(interval '18 months', …)` (`…20260812000400_retention_purges.sql`) | **No — unscheduled.** Note this function had never deleted a row before `public.review_report` existed: its predicate needs `status` and `reviewed_at`, and nothing in the schema ever set either (`…20260813000100_review_report.sql`) |
+| Reports, unresolved, reported account still active | Published as having no defined period | **None, deliberately.** A scheduled job here would destroy open safety complaints; the control is working the queue ([MODERATION_PROCESS.md](MODERATION_PROCESS.md) §7) | No limit exists |
+| Reports, unresolved, reported account deleted | 24 months from filing | Second branch of `purge_resolved_reports`, keyed on `created_at` because a never-resolved report has no `reviewed_at` (`…20260812000400_retention_purges.sql`) | **No — unscheduled** |
+| Reports **about** a deleted account | Retained without the reported person's identity | `reported_user_id`, `post_id` and `comment_id` are `on delete set null`; `reported_user_key` keeps a pseudonym for the former subject (`…20260101000300_social_tables.sql`, `…20260811000400_feed_reports.sql`) | Yes — the row survives; its own clock (rows above) then applies |
+| Reports **filed by** a deleted account | Not published | `reporter_id` is still `on delete cascade` to `profiles`, which cascades from `auth.users` (`…000200_core_tables.sql:7`), so a departing user's own reports — including open reports about third parties — are destroyed with their account. Separate operator decision, not yet taken ([MODERATION_PROCESS.md](MODERATION_PROCESS.md) §8) | Immediate deletion, not retention |
 | Friendships, blocks | Until removed / unblocked | `delete_account()` deletes both for the departing user (`…000850:277-278`) | Yes, on user request |
 | Friend tokens | Until revoked or regenerated | `regenerate_friend_token` revokes prior tokens (`…000800_rpc_social.sql:23-25`); `delete_account()` deletes them (`…000850:276`) | Yes |
 | Nudges | Not published | **None.** No purge function; removed only by the `profiles` cascade on account deletion | No limit exists |
@@ -480,13 +499,15 @@ than one that admits a gap.
    never deleted (`…20260812000200:55-64`), and `object_path` embeds the owner's uuid. No purge
    function covers this table, so a record that user X once had a photo at a given path — plus any
    `last_error` text — outlives both the photo and, potentially, the account.
-9. **Account deletion destroys moderation reports filed by *and about* the deleted user.** Both
-   `reports` FKs cascade from `profiles` (`…000300_social_tables.sql:54-55`), which cascades from
-   `auth.users` (`…000200_core_tables.sql:7`), and the Edge Function deletes the auth user
-   (`supabase/functions/delete-account/index.ts:69`). This contradicts
-   `docs/legal/ACCOUNT_DELETION_POLICY.md:29` and the 18-month clock in `purge_resolved_reports`,
-   and means a reported user can erase the reports about them by deleting their account. See
-   [DPIA.md](DPIA.md) §3.7.
+9. **Account deletion still destroys moderation reports filed *by* the deleted user** (narrowed
+   2026-08-13). Reports **about** a deleted account now survive, minimised and pseudonymised
+   (`…20260101000300_social_tables.sql`, `…20260811000400_feed_reports.sql`), which resolves the
+   contradiction with `docs/legal/ACCOUNT_DELETION_POLICY.md` and lets the retention clock in
+   `purge_resolved_reports` actually run. `reporter_id` still cascades, so a departing user's own
+   reports — including open reports about third parties — are destroyed with their account; that is a
+   separate decision the operator has not taken ([MODERATION_PROCESS.md](MODERATION_PROCESS.md) §8).
+   Outstanding for the part that was done: counsel sign-off on the Art. 17(3)(e) basis and on the
+   18-month / 24-month periods. See [DPIA.md](DPIA.md) §3.7.
 10. **Supabase region unchosen**, so third-country transfer status is undetermined (§6).
 11. **The feed is backend-only on this revision.** No feed screens, and no post/comment/cheer RPC
     contracts, exist in the app (`CheekyPint/Features/` contains no feed feature; no Swift file

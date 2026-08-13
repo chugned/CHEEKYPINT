@@ -318,31 +318,70 @@ post — only delete the whole post or report the comment (`docs/MODERATION.md:4
 administratively disabled profile can still write: the disable is a `profiles.deleted_at` update that
 hides the account from every read path but leaves its JWT valid, and no write path re-checks the
 caller's own `deleted_at` (`docs/MODERATION.md:155-163`). **Residual risk: moderate likelihood,
-moderate-to-high severity, accepted with the justification above.** `[[Operator decision: target
-triage turnaround, and who performs it.]]`
+moderate-to-high severity, accepted with the justification above.** Partly addressed since: the
+triage turnaround and who performs it are now written down rather than bracketed — one operator,
+queue checked every 48 hours, same day for `underage_concern` and `impersonation`
+([MODERATION_PROCESS.md](MODERATION_PROCESS.md) §9) — and a report can now be recorded as answered at
+all (§3.7, §3.8). Still true that there is no service-level commitment to users, no second reviewer,
+and no cover when the operator is unavailable.
 
 ### 3.7 Risk 7 — account deletion erases the moderation record about the deleted user
 
-**What the system does.** `reports.reporter_id` and `reports.reported_user_id` both cascade from
-`profiles` (`…20260101000300_social_tables.sql:54-55`), and `profiles` cascades from `auth.users`
-(`…20260101000200_core_tables.sql:7`). The `delete-account` Edge Function deletes the auth user
-(`supabase/functions/delete-account/index.ts:69`). Therefore deleting an account destroys every
+**Status: decided by the operator on 2026-08-13 and implemented for `reported_user_id`. Partially
+remaining for `reporter_id`. Counsel sign-off on the retention period is still outstanding.**
+
+**What the system did.** `reports.reporter_id` and `reports.reported_user_id` both cascaded from
+`profiles`, and `profiles` cascades from `auth.users` (`…20260101000200_core_tables.sql:7`). The
+`delete-account` Edge Function deletes the auth user
+(`supabase/functions/delete-account/index.ts:69`). Deleting an account therefore destroyed every
 report filed **by** that user and every report filed **about** them, immediately and irreversibly.
+Worse than the FK alone suggested: `reports.post_id` / `reports.comment_id` also cascaded, from
+`posts` / `post_comments`, which themselves cascade from `profiles` — so even severing
+`reported_user_id` on its own would have retained nothing for any report about a *post* or *comment*.
 
-**Risk.** Two distinct harms. First, to *other* data subjects: a user who reported harassment loses
-their report, and the safety history that justified retaining it under Art. 6(1)(f) is gone. Second,
-to the integrity of the safety process: a user who has been reported can erase the reports about them
-by exercising their Art. 17 right, and could then return under a new account with no trace. Third, it
-contradicts what users are told — `docs/legal/ACCOUNT_DELETION_POLICY.md:29` says reports "may be
-retained (anonymised where possible)", and `purge_resolved_reports` implements an 18-month clock
-(`…20260812000400_retention_purges.sql:95-114`) that the cascade pre-empts.
+**Risk.** Three harms. First, to *other* data subjects: a user who reported harassment lost their
+report, and the safety history that justified retaining it under Art. 6(1)(f) went with it. Second, to
+the integrity of the safety process: a reported user could erase the reports about them by exercising
+their Art. 17 right. Third, it contradicted what users are told —
+`docs/legal/ACCOUNT_DELETION_POLICY.md` says reports "may be retained", and `purge_resolved_reports`
+implements an 18-month clock that the cascade pre-empted.
 
-**Assessment.** This needs a deliberate decision, not a silent cascade. Retaining a report about a
-departed user beyond their erasure request requires an Art. 17(3) justification and, if kept, the
-`reported_user_id` reference would need to be severed or pseudonymised rather than left pointing at a
-deleted row. **Residual risk: moderate likelihood, moderate severity, unmitigated and
-undocumented-until-now.** `[[Operator + counsel decision: whether reports survive deletion, in what
-form, and for how long.]]`
+**What changed.** `reported_user_id` is now nullable with `on delete set null`, and
+`reports.post_id` / `reports.comment_id` likewise, so a report survives deletion of its subject and of
+the content it concerned (`…20260101000300_social_tables.sql`,
+`…20260811000400_feed_reports.sql`). The retained row keeps only the category, the timestamps, the
+reporter's free text, and `reported_user_key` — a stable pseudonym derived from the former account id
+via sha256 with a domain-separation label — so reports about one former account can still be grouped
+with no live reference to a person. Legal basis for retaining against an erasure request:
+**Art. 17(3)(e)** (establishment, exercise or defence of legal claims), plus audit of the controller's
+own moderation decisions. Retention is bounded: 18 months from `reviewed_at` if resolved, 24 months
+from `created_at` if the subject is gone and it was never resolved
+(`…20260812000400_retention_purges.sql`).
+
+**What this explicitly does NOT achieve.** It does not detect the same human returning under a new
+account, and must not be described as doing so. The key is derived from the *account* id; a fresh
+registration produces a fresh id and therefore an unrelated key, and nothing device-, email- or
+contact-derived feeds into it. The "could then return under a new account with no trace" harm named in
+the pre-decision version of this risk is **not mitigated** and is not intended to be — mitigating it
+would require cross-account identification of a person who has exercised their right to erasure,
+which would be a materially more intrusive processing operation needing its own assessment and its own
+lawful basis. It is not proposed.
+
+The retained row is **pseudonymised, not anonymised** (Art. 4(5)): it remains personal data, remains
+in scope for this DPIA and the retention policy, and anyone who independently holds the former account
+id can recompute the key and confirm which rows concerned that account. That confirmability is
+deliberate — it is what makes the record useful for the Art. 17(3)(e) purpose — and it is why the row
+carries a retention clock rather than being treated as anonymous.
+
+**Residual.** `reporter_id` still cascades, so a report **filed by** a departing user is still
+destroyed, including an open report about a third party; that is a separate operator decision, not yet
+taken (`docs/MODERATION_PROCESS.md` §8). A retained report also no longer records whether it concerned
+a post, a comment, or the account as a whole, since both content links are cleared — `category` is the
+only surviving hint. And the retention numbers are engineering defaults chosen for internal
+consistency, not legal advice. **Residual risk: low likelihood, low-to-moderate severity, mitigated in
+the schema and asserted in the RLS/RPC suite; the period itself is
+`[[outstanding — counsel sign-off on 18 months / 24 months, and on the Art. 17(3)(e) justification
+itself]]`.**
 
 ### 3.8 Risk 8 — published retention periods are not enforced, so data is kept indefinitely
 
@@ -361,8 +400,21 @@ without limit; `rate_limit_events` accumulates a per-user, per-second action log
 categories have no purge function at all, so they are unbounded by design rather than by omission:
 `nudges`, and `storage_gc_queue`, whose rows are marked processed but never deleted
 (`…20260812000200_storage_gc_queue.sql:55-64`) while `object_path` embeds the owner's uuid.
-Unresolved reports (`open`, `reviewing`) are outside `purge_resolved_reports`'s predicate
-(`…20260812000400:106-107`) and so are also unbounded.
+Unresolved reports about a **live** account are outside `purge_resolved_reports`'s predicate and so
+are also unbounded — now deliberately rather than by omission, since the alternative is a scheduled job
+that destroys open safety complaints (`docs/legal/DATA_RETENTION_POLICY.md`,
+`docs/MODERATION_PROCESS.md` §7). Working the queue is the control; §4.3 carries it.
+
+**Updated 2026-08-13 — `purge_resolved_reports` was not merely unscheduled, it was unreachable.** Its
+predicate required `reports.status` and `reports.reviewed_at`, and until `public.review_report`
+(`…20260813000100_review_report.sql`) nothing in the entire schema ever set either column: every
+`set status` in the migrations belonged to friendships or pub sessions. The function had therefore
+never deleted a row in its life, and the 18-month commitment in
+`docs/legal/DATA_RETENTION_POLICY.md` was unenforceable **in principle**, not just unscheduled. The
+RLS/RPC suite now asserts that it actually deletes an actioned, aged report, and a CHECK constraint
+(`report_reviewed_at_matches_status`) makes the resolved-but-unstamped state that hid this
+unrepresentable. Scheduling remains outstanding (§4.5), so the row below is still accurate about
+enforcement.
 
 **Residual risk: certain likelihood while unscheduled, moderate severity — a straightforward Art.
 5(1)(e) storage-limitation failure, and the gap between what `docs/legal/DATA_RETENTION_POLICY.md`
@@ -486,13 +538,15 @@ moderator or service-role actions (`docs/MODERATION.md:163` lists an audit log a
 | Server-side sanitisation of post and comment text | `…20260811000100_feed_tables.sql:12-28`, applied at `…20260811000500:26-30` and `…20260811000600:88` | 3.11 |
 | @-mentions restricted to the commenter's own friends; a mention that would leak a third party's hidden relationship is dropped silently rather than rejected distinguishably | `…20260811000600_rpc_feed_social.sql:106-114` | 3.4, 3.6 |
 | Reporting for accounts, posts and comments into one queue | `…20260101000800_rpc_social.sql:204-228`; `…20260811000700_rpc_feed_reports.sql:4-76` | 3.2, 3.6 |
+| The queue can be *answered*, not only written: one service-role transition function stamps the review outcome, with a CHECK making the resolved-but-unstamped (therefore unpurgeable) state unrepresentable | `…20260813000100_review_report.sql`; constraint in `…20260101000300_social_tables.sql`; process in [MODERATION_PROCESS.md](MODERATION_PROCESS.md) | 3.6, 3.8 |
+| Reports survive deletion of the reported account in minimised, pseudonymised form, with a bounded lifetime — not cross-account identification | `…20260101000300_social_tables.sql`; `…20260811000400_feed_reports.sql`; `…20260812000400_retention_purges.sql` | 3.7 |
 | Erasure spans database, both storage buckets and the auth user, aborting before auth deletion if storage cleanup fails so the request stays retryable; the app invokes the Edge Function rather than the bare RPC, pinned by a regression test | `…20260101000850_rpc_pints_sessions.sql:254-284`; `supabase/functions/delete-account/index.ts:45-70`; `CheekyPint/Core/Database/ProfileRepository.swift:98-101`; `CheekyPintTests/DeleteAccountWiringTests.swift:52-61` | 3.5, 3.8 |
 | Deferred byte deletion: the path is captured in the same statement that soft-deletes the post, because the row is its only record | `…20260812000300_enqueue_deleted_post_images.sql:44-48`; drained by `supabase/functions/storage-gc/index.ts:57-100` | 3.5, 3.8 |
 | Self-service export scoped to `auth.uid()` in every subquery, bounded at 10,000 rows per collection with a `truncated` flag, live credentials excluded | `…20260812000500_export_my_data.sql:81-403`, cap `:89`, exclusions `:63-72` | 3.9 |
 | Never celebrates heavy or rapid drinking: confirmation tone is replaced by a neutral welfare message when entries cluster, computed on device and stored nowhere | `CheekyPintCore/…/WelfareMonitor.swift:11-45` | Welfare (not a GDPR risk, recorded for completeness) |
 | No third-party SDKs; analytics a no-op with a nine-event, no-personal-data allowlist | `project.yml:26-28,53-55`; `CheekyPint/Core/Analytics/AnalyticsService.swift:6-29` | 3.6, 3.13 |
 | Service-role key confined to Edge Function environments; `storage-gc` requires the key itself, not merely a user JWT | `supabase/functions/delete-account/index.ts:12`; `supabase/functions/storage-gc/index.ts:49-51` | 3.15 |
-| Automated verification of allowed and denied paths across RLS and every RPC | `supabase/tests/rls_rpc_suite.sql` via `supabase/tests/run_local_pg.sh` — 87 checks pass on this revision | all technical |
+| Automated verification of allowed and denied paths across RLS and every RPC | `supabase/tests/rls_rpc_suite.sql` via `supabase/tests/run_local_pg.sh` — 106 checks pass on this revision | all technical |
 
 ### 4.2 Measures required before launch — legal
 
@@ -500,7 +554,7 @@ moderator or service-role actions (`docs/MODERATION.md:163` lists an audit log a
 |---|---|---|
 | L1 | **Obtain qualified Austrian legal advice on the Art. 9 classification of the drink diary**, and implement whatever follows: lawful basis, explicit-consent flow and withdrawal path if required, DPO reassessment, corrections to `docs/legal/PRIVACY_POLICY.md:28` and `docs/APP_PRIVACY_DATA_MAPPING.md:31` | 3.1 |
 | L2 | Review of all `docs/legal/*` templates and completion of every `[[placeholder]]` | 3.13, all |
-| L3 | Decide whether moderation reports survive account deletion, in what form, and record the Art. 17(3) basis | 3.7 |
+| L3 | **Partly done (2026-08-13).** Reports about a deleted account now survive, minimised and pseudonymised, on the Art. 17(3)(e) basis recorded in §3.7. Still outstanding: counsel sign-off on that basis and on the 18-month / 24-month periods, and the separate decision on reports *filed by* a departing user ([MODERATION_PROCESS.md](MODERATION_PROCESS.md) §8) | 3.7 |
 | L4 | Decide the basis for withholding report contents from a reported data subject who makes an access request | 3.14 |
 | L5 | Choose the Supabase region, execute and reference the Art. 28 DPA, and complete the transfer section | 3.13 |
 | L6 | Assess whether self-declared age is defensible for this content | 3.12 |
@@ -512,7 +566,7 @@ moderator or service-role actions (`docs/MODERATION.md:163` lists an audit log a
 |---|---|---|
 | O1 | **Schedule every retention job** — `prune_rate_limit_events`, `purge_soft_deleted_posts`, `purge_soft_deleted_comments`, `purge_soft_deleted_pint_entries`, `purge_resolved_reports`, and the `storage-gc` drain (`docs/RELEASE_CHECKLIST.md:12-20`). Until this is done the published retention policy is not met | 3.8 |
 | O2 | Monitor `storage_gc_queue` for `attempts > 3` or a non-null `last_error` (`docs/RELEASE_CHECKLIST.md:22-23`) | 3.8 |
-| O3 | Define and staff moderation triage, with a target turnaround for `underage_concern` and harassment | 3.6, 3.12 |
+| O3 | **Process written (2026-08-13):** [MODERATION_PROCESS.md](MODERATION_PROCESS.md) defines statuses, per-category handling, the enforcement SQL, and a target of every 48 hours (same day for `underage_concern` and `impersonation`) performed by the single operator. Outstanding: the operator committing to that target, or amending it to one that will be met. Not staffed beyond one person, and not published to users as an SLA | 3.6, 3.12 |
 | O4 | Establish the data-subject request process for the rights the app cannot self-serve (`docs/RELEASE_CHECKLIST.md:55`) | 3.9, 3.14 |
 
 ### 4.4 Measures recommended before launch — technical
@@ -522,7 +576,7 @@ moderator or service-role actions (`docs/MODERATION.md:163` lists an audit log a
 | T1 | Make `avatars` a private bucket with a visibility-aware read policy, mirroring `…20260812000100_private_post_images.sql` | 3.5(b) |
 | T2 | Ship the export screen so Art. 15/20 is genuinely self-service, and correct `docs/PRIVACY.md:36-37` / `docs/legal/PRIVACY_POLICY.md:65` until it exists | 3.9 |
 | T3 | Give the user a read path for Nudges they sent | 3.9 |
-| T4 | Add a retention limit for `storage_gc_queue`, `nudges`, and unresolved reports | 3.8 |
+| T4 | Add a retention limit for `storage_gc_queue` and `nudges`. Unresolved reports are now partly covered: those whose subject has been deleted expire 24 months after filing (`…20260812000400_retention_purges.sql`); those about a live account remain unbounded **deliberately** (§3.8) | 3.8 |
 | T5 | Move profile-text sanitisation and the username reserved-word check server-side, behind an RPC | 3.11 |
 | T6 | Rate-limit and sanitise `pubs` inserts; cap `formatted_address` | 3.11 |
 | T7 | Have write paths re-check the caller's own `profiles.deleted_at`, so an administratively disabled account cannot keep posting (`docs/MODERATION.md:155-163`) | 3.6 |

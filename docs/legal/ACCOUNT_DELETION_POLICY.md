@@ -26,8 +26,15 @@ confirm, and may ask you to re-authenticate.
 
 ## What may remain
 
-- Moderation reports you filed or that concern safety may be retained (anonymised where possible)
-  for the period in the Data Retention Policy.
+- **Reports other people made about you are kept, without your identity.** We remove the link to your
+  account and keep the report itself — its category, its dates, and what the reporter wrote — so that
+  we can answer or defend legal claims and audit our own moderation decisions. A one-way
+  pseudonymous key replaces your identity so that reports about the same former account can still be
+  grouped together; it **cannot** recognise you if you sign up again, because a new account is a new
+  identity to us. These reports are deleted on the schedule in the
+  [Data Retention Policy](DATA_RETENTION_POLICY.md).
+- **Reports you filed are deleted with your account.** Note this includes reports you made about
+  other people, even if they had not yet been reviewed.
 - Residual copies in encrypted backups roll off on the backup schedule.
 - Anonymous, non-identifying aggregate analytics are unaffected.
 

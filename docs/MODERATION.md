@@ -99,9 +99,16 @@ after RPC authorisation.
     `inappropriate_profile_image` on a post report
     (`supabase/migrations/20260811000300_report_category_post_image.sql`) — harassment,
     impersonation, underage concern, other. All three RPCs share the `report` rate limit.
-  - `reported_user_id` is `not null` on every row, so a report always targets an account; it may
-    additionally target at most one *content* item — a post or a comment, never both
-    (`reports_single_target` check, `supabase/migrations/20260811000400_feed_reports.sql:10-12`).
+  - A report always names an account **when it is filed** — `reported_user_id` is enforced non-null
+    at insert by the `reports_stamp_subject_key` trigger
+    (`supabase/migrations/20260101000300_social_tables.sql`) — and may additionally target at most one
+    *content* item, a post or a comment, never both (`reports_single_target` check,
+    `supabase/migrations/20260811000400_feed_reports.sql`). The column itself is nullable, for one
+    reason only: a report **outlives the account it is about**. On deletion of the reported account,
+    `reported_user_id`, `post_id` and `comment_id` are all set to NULL and the row is kept, with a
+    stable pseudonym for the former subject in `reported_user_key`. That key cannot identify a person
+    across accounts — see [MODERATION_PROCESS.md](MODERATION_PROCESS.md) §6, which is explicit about
+    what it does and does not achieve. Reports the departing user *filed* still cascade away.
 - **Remove friend** — ends the relationship without blocking.
 
 ## Preventive controls
@@ -149,9 +156,29 @@ after RPC authorisation.
 
 ## Admin / back office
 
-- `reports` table is a queue (`open → reviewing → actioned → dismissed`) with indexes on
-  `(status, created_at)`, `reported_user_id`, and now also `post_id` / `comment_id` for content
-  reports (`supabase/migrations/20260811000400_feed_reports.sql:14-15`).
+**The runbook is [MODERATION_PROCESS.md](MODERATION_PROCESS.md)** — statuses and what each commits
+you to, the SQL the operator pastes into the Supabase dashboard, per-category handling, enforcement
+actions, retention, and how the queue meets App Store Review guideline 1.2's "timely response" limb.
+This section covers only what the *schema* provides.
+
+- `reports` is a queue (`open → reviewing → actioned → dismissed`) with indexes on
+  `(status, created_at)`, `reported_user_id`, `reported_user_key`, and `post_id` / `comment_id` for
+  content reports (`supabase/migrations/20260101000300_social_tables.sql`,
+  `supabase/migrations/20260811000400_feed_reports.sql`).
+- `public.review_report(report_id, status)` is the only supported transition
+  (`supabase/migrations/20260813000100_review_report.sql`). Service role only: revoked from `public`,
+  `anon` and `authenticated`, granted to `service_role`, and asserted by function privilege in the
+  RLS/RPC suite. It stamps `reviewed_at` for `actioned`/`dismissed`, refuses a transition to `open`,
+  and refuses an unknown id. It records a decision and deliberately performs **no** enforcement.
+- Until that function existed the queue was **write-only**: nothing in the schema ever set
+  `reports.status` or `reports.reviewed_at`, so `purge_resolved_reports` — which matches on both —
+  had never deleted a row, and the retention commitment in
+  `docs/legal/DATA_RETENTION_POLICY.md` was unenforceable in principle. A CHECK constraint
+  (`report_reviewed_at_matches_status`) now makes the resolved-but-unstamped state unrepresentable, so
+  a hand-typed dashboard `UPDATE` cannot silently recreate it.
+- There is no admin **read** RPC and no moderator role. The operator reads the queue in the Supabase
+  dashboard as the project owner, where RLS does not apply to them; the table's only policy,
+  `reports_select_own`, serves reporters reading their own filed reports.
 - An administrator can disable an abusive profile by setting `profiles.deleted_at` via the service
   role / an internal tool. This is complete on every **read** path: `pr.deleted_at is null` gates
   the profile out of `feed_page`, `post_comments_page`, and friend-facing lookups alike. It is
