@@ -53,7 +53,8 @@ Oldest first, with the two categories that warrant jumping the queue pulled to t
 
 ```sql
 select id, status, category, created_at,
-       reported_user_id, reported_user_key, post_id, comment_id, details
+       reporter_id, reporter_key, reported_user_id, reported_user_key,
+       post_id, comment_id, details
   from public.reports
  where status in ('open', 'reviewing')
  order by case category
@@ -167,14 +168,38 @@ update public.profiles set avatar_path = null where id = '<subject-uuid>'::uuid;
 The bytes are removed by the `storage-gc` Edge Function draining `storage_gc_queue`. If that job is
 not scheduled, **nothing deletes the photo** — check `docs/RELEASE_CHECKLIST.md`.
 
-## 6. Reports about accounts that no longer exist
+## 6. Reports whose parties no longer exist
 
-A report survives deletion of the account it is about. `reported_user_id` becomes NULL and
-`reported_user_key` keeps a stable pseudonym for the former subject
-(`…20260101000300_social_tables.sql`). What survives: category, `created_at`, `reviewed_at`, the
-reporter's `details`, and that key. What does not: any link to a person, and — because the content
-links are also cleared — whether the report was originally about a post, a comment, or the account
-as a whole. `category` is the only remaining hint.
+A report survives deletion of **either** party. The id column is de-linked to NULL and the matching
+pseudonymous key is retained (`…20260101000300_social_tables.sql`).
+
+| The account that left | What is kept | What is lost |
+|---|---|---|
+| The **reported** account | Category, `created_at`, `reviewed_at`, the reporter's `details`, `reported_user_key`, and the reporter's own identity | The link to the reported person; and, because the content links are cleared with them, whether the report was about a post, a comment, or the account as a whole — `category` is the only remaining hint |
+| The **reporting** account | Category, `created_at`, `reviewed_at`, `reporter_key`, the reported person's identity (if still live), and `post_id`/`comment_id` | The link to the reporter, **and their `details` text — erased, not de-linked** |
+
+**Why `details` goes when the reporter goes.** It is up to 1,000 characters written *by* the reporter,
+so it is their own personal data as much as it is evidence about someone else. Keeping a *subject's*
+report against their erasure request rests on Art. 17(3)(e) — defending claims about that subject —
+and the reporter's text is the evidence that does the defending, so it stays. There is no equivalent
+basis for keeping a departing reporter's narrative about a third party after they have asked to be
+erased. What is kept is the **signal** (a complaint of this category was made about this subject on
+this date, pointing at this content); what goes is the **narrative**.
+
+**What that costs, plainly.** For a **post or comment report** the real evidence is the reported
+content itself, which `post_id`/`comment_id` still point at, so little is lost — the prose was
+commentary on evidence you can still open. For an **account-level report** (no `post_id`, no
+`comment_id`) the free text may have been the *only* evidence, and clearing it can leave a row that
+records that a complaint of some category existed without recording what it alleged. That is a real
+loss, not a free trade. If a specific account report matters and its reporter still exists, resolve it
+while you can still read it.
+
+The two keys are in **separate namespaces**, deliberately: `report_reporter_key(X)` and
+`report_subject_key(X)` are different values for the same account X. That means you cannot join one
+row's reporter key to another row's subject key to discover that the person who filed A is the person
+B is about. If you legitimately need that comparison for one person and you hold their account id, you
+can still compute both keys yourself and compare — what is prevented is doing it in bulk, across the
+whole table, with no id in hand.
 
 Group the retained reports about one former account, if you still hold its uuid (e.g. from an earlier
 report, a support thread, or a legal request):
@@ -186,15 +211,33 @@ select id, category, status, created_at, details
  order by created_at desc;
 ```
 
-...or group them without knowing any uuid, to see whether several retained reports concern one former
-account:
+...the reports a former account **filed** (note `details` will be NULL on all of them):
 
 ```sql
-select reported_user_key, count(*) as reports, min(created_at), max(created_at)
+select id, category, status, created_at, reported_user_id, post_id, comment_id
+  from public.reports
+ where reporter_key = public.report_reporter_key('<former-account-uuid>'::uuid)
+ order by created_at desc;
+```
+
+...or group them without knowing any uuid — useful when answering a claim, to see whether a cluster of
+complaints about one former subject came from one complainant or from many independent ones:
+
+```sql
+-- retained reports grouped by former subject
+select reported_user_key, count(*) as reports,
+       count(distinct reporter_key) as distinct_reporters,
+       min(created_at), max(created_at)
   from public.reports
  where reported_user_id is null
  group by reported_user_key
 having count(*) > 1;
+
+-- reports left behind by departed reporters
+select reporter_key, count(*) as reports, min(created_at), max(created_at)
+  from public.reports
+ where reporter_id is null
+ group by reporter_key;
 ```
 
 **What this cannot do.** The key is derived from the *account* id. A person who deletes their account
@@ -208,25 +251,38 @@ carries a retention clock (§7), and anyone who independently holds the former a
 recompute the key and confirm which rows concerned it. That recomputability is the point — it is what
 lets you answer "produce the reports concerning this account" months later.
 
-**A report the departing user *filed* is deleted with their account.** `reporter_id` still cascades.
-So if someone reports harassment and then deletes their account, their report disappears — including
-open reports about third parties. That asymmetry is a deliberate open question, not an oversight; see
-§8.
+Both retained rows are **pseudonymised, not anonymous**: still personal data under Art. 4(5), still on
+a retention clock (§7), and anyone who independently holds the former account id can recompute either
+key and confirm which rows involved it. That recomputability is the point — it is what lets you answer
+"produce the reports concerning this account" months later.
+
+**Neither key identifies a person across accounts.** Both are derived from the *account* id, so a
+person who deletes their account and registers again gets a new id and therefore unrelated keys, in
+both roles. There is **no repeat-offender detection here.** Do not treat "a new account with clean
+keys" as evidence of anything, and do not describe this capability to a user, a reviewer, or counsel as
+if it detected returning offenders.
 
 ## 7. Retention
 
 | Class | Clock | Function |
 |---|---|---|
 | Resolved (`actioned`/`dismissed`) | 18 months after `reviewed_at` | `purge_resolved_reports(interval '18 months', …)` |
-| Subject deleted, never resolved | 24 months after `created_at` | same function, second parameter |
-| Subject live, never resolved | **No limit exists.** | none |
+| Subject deleted, never resolved — including rows where the **reporter is also gone** | 24 months after `created_at` | same function, second parameter |
+| Subject live, never resolved — whether or not the reporter has left | **No limit exists.** | none |
 
 Both numbers are engineering defaults chosen for internal consistency and **require counsel
 sign-off** — see [DATA_RETENTION_POLICY.md](legal/DATA_RETENTION_POLICY.md).
 
+The second row deliberately covers the **fully de-linked** report — no reporter and no subject. That
+row has no living party left to trigger any other cleanup, so if the purge missed it, it would be
+retained forever; the branch keys on `reported_user_id is null`, which catches it.
+
 The third row is deliberate. A never-triaged report about a live account is a backlog, and the fix is
-to triage it, not to have a job quietly destroy an open safety report. It does mean the queue is
-unbounded if it is not worked, which is the operational argument for §9's target.
+to triage it, not to have a job quietly destroy an open safety report. A reporter having departed does
+not make a complaint about a live account less worth reading — it makes it harder to follow up, which
+is an argument for triaging sooner, not for deleting. Such a row keeps its category, dates and content
+links indefinitely, though its `details` has already gone with its reporter. That the queue is
+unbounded if it is not worked is the operational argument for §9's target.
 
 `purge_resolved_reports` is service-role only and **must be scheduled** or none of this happens
 (`docs/RELEASE_CHECKLIST.md`). Run it by hand as the owner with:
@@ -236,14 +292,27 @@ select public.purge_resolved_reports();                  -- 18 months / 24 month
 select public.purge_resolved_reports(interval '18 months', interval '24 months');
 ```
 
-## 8. Open decision: reports filed *by* a departing user
+## 8. Decided: reports filed *by* a departing user
 
-Today, `reporter_id` cascades: deleting your account deletes every report you filed. The retention
-decision covered `reported_user_id` only. The same treatment (`on delete set null` plus the existing
-pseudonymous subject key, which is about the subject and would be unaffected) would keep an open
-report about a third party alive after its reporter leaves. It has not been done, because it is a
-different balance — the reporter's own free-text account of an incident is *their* personal data, and
-they have not been reported by anyone. Recorded here so it can be decided rather than drifted into.
+**Resolved 2026-08-13.** `reporter_id` previously cascaded, so deleting your account deleted every
+report you filed — which made the reporter the one party who could unilaterally destroy a live safety
+complaint *about someone else*, including one nobody had reviewed yet, simply by leaving.
+
+It is now `on delete set null` with `reporter_key` retained and `details` erased, per §6. The
+operational consequences for you:
+
+- A queue read can contain reports with no reporter to follow up with. Those rows have no `details`,
+  so for an account-level report you may be looking at a category and a date and nothing else. Judging
+  such a report on the reported content (if any) is all that remains; dismissing it for lack of
+  evidence is a legitimate outcome, and `dismissed` is the honest status for it.
+- Those rows are invisible to every client, including the app — `reports_select_own` is
+  `reporter_id = auth.uid()`, which matches nothing once the column is NULL. They exist only for you,
+  in the dashboard.
+- Nothing else about them changes: they still transition through `review_report`, still carry the
+  subject's identity while that account lives, and still expire on the §7 clocks.
+
+The cost of the erasure is stated plainly in §6 rather than glossed: it is cheap for content reports
+and genuinely expensive for account-level ones.
 
 ## 9. App Store Review guideline 1.2
 
@@ -270,6 +339,12 @@ committed to and can meet alone; it is not a contractual SLA, it is not staffed 
 it is not published to users as a promise. Users are told what is true: Block works instantly, and
 reports are reviewed by a person. If the app ever grows past one person's capacity to hold that
 target, the honest response is to add reviewers, not to lower the target quietly.
+
+**A note on de-linked rows and 1.2.** A report whose reporter has left keeps its category, dates and
+content links but loses the reporter's text (§6). That does not weaken the reporting mechanism — the
+mechanism is the ability to file and have a person respond, both of which are unaffected — but it does
+mean some rows in the queue cannot be adjudicated on their text. Resolve reports while their reporters
+still exist; that is another reason the §9 target matters.
 
 **Evidence for a reviewer, if asked.** The queue's schema and its transition function are in
 `supabase/migrations/20260101000300_social_tables.sql` and

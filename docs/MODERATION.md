@@ -104,11 +104,16 @@ after RPC authorisation.
     (`supabase/migrations/20260101000300_social_tables.sql`) — and may additionally target at most one
     *content* item, a post or a comment, never both (`reports_single_target` check,
     `supabase/migrations/20260811000400_feed_reports.sql`). The column itself is nullable, for one
-    reason only: a report **outlives the account it is about**. On deletion of the reported account,
-    `reported_user_id`, `post_id` and `comment_id` are all set to NULL and the row is kept, with a
-    stable pseudonym for the former subject in `reported_user_key`. That key cannot identify a person
-    across accounts — see [MODERATION_PROCESS.md](MODERATION_PROCESS.md) §6, which is explicit about
-    what it does and does not achieve. Reports the departing user *filed* still cascade away.
+    reason only: a report **outlives both accounts involved in it**. On deletion of the reported
+    account, `reported_user_id`, `post_id` and `comment_id` are set to NULL and the row is kept, with a
+    stable pseudonym for the former subject in `reported_user_key`. On deletion of the *reporting*
+    account, `reporter_id` is set to NULL, `reporter_key` keeps the pseudonym — and `details`, the
+    reporter's own free text, is **erased**, guaranteed by the `report_details_erased_with_reporter`
+    CHECK rather than by the trigger that satisfies it, so the erasure cannot silently fail to happen.
+    The two keys are in separate namespaces, so the roles cannot be joined across de-linked rows.
+    Neither key identifies a person across accounts — see
+    [MODERATION_PROCESS.md](MODERATION_PROCESS.md) §6, which is explicit about what they do and do not
+    achieve, and about what erasing `details` costs for an account-level report.
 - **Remove friend** — ends the relationship without blocking.
 
 ## Preventive controls
@@ -162,9 +167,14 @@ actions, retention, and how the queue meets App Store Review guideline 1.2's "ti
 This section covers only what the *schema* provides.
 
 - `reports` is a queue (`open → reviewing → actioned → dismissed`) with indexes on
-  `(status, created_at)`, `reported_user_id`, `reported_user_key`, and `post_id` / `comment_id` for
+  `(status, created_at)`, both party ids, both party keys, and `post_id` / `comment_id` for
   content reports (`supabase/migrations/20260101000300_social_tables.sql`,
   `supabase/migrations/20260811000400_feed_reports.sql`).
+- A **de-linked** report is invisible to every client: `reports_select_own` is
+  `reporter_id = auth.uid()`, which yields NULL rather than true once that column is NULL, so a row
+  whose reporter has left is readable only by the operator in the dashboard. That is deliberate and
+  asserted — the two tidier spellings of that policy (`is not distinct from`, or an added
+  `or reporter_id is null`) would each leak those rows to clients.
 - `public.review_report(report_id, status)` is the only supported transition
   (`supabase/migrations/20260813000100_review_report.sql`). Service role only: revoked from `public`,
   `anon` and `authenticated`, granted to `service_role`, and asserted by function privilege in the

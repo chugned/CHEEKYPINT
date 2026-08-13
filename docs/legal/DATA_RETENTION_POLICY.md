@@ -19,6 +19,7 @@ the service safe.
 | Friends / blocks | While active or until removed/unblocked |
 | Reports (moderation), resolved | [[12–24 months]] after resolution, for safety and audit (`purge_resolved_reports`, defaults to 18 months from the review decision) |
 | Reports (moderation), where the reported account has been deleted | Kept without the reported person's identity; deleted [[24 months]] after the report was filed if it was never resolved, or on the resolved schedule above if it was — see "Reports about deleted accounts" below |
+| Reports (moderation), where the **reporting** account has been deleted | Kept without the reporter's identity **and without the text they wrote**, which is erased; otherwise on the schedules above |
 | Reports (moderation), unresolved, reported account still active | **No defined period.** Kept until reviewed. See the note below |
 | Rate-limit events | Rolling [[2 days]] (pruned automatically) |
 | Analytics events (if enabled) | Aggregated/identifier-free; [[14 months]] |
@@ -33,23 +34,34 @@ with the post itself, when the post's own 30-day purge runs. A comment made on a
 post was soft-deleted is removed this way even though the comment itself was never soft-deleted
 and was not independently due for deletion.
 
-## Reports about deleted accounts
+## Reports involving deleted accounts
 
-If someone deletes their CheekyPint account, reports **about** them are not deleted with it. The
-report keeps its category, its dates, and what the reporter wrote; the link to the person is removed
-and replaced with a one-way pseudonymous key so that reports about the same former account can still
-be grouped. We keep this to be able to defend or answer legal claims and to audit our own moderation
-decisions (Art. 17(3)(e)).
+A moderation report is not deleted when either person involved in it deletes their account. In both
+cases the link to that person is removed and replaced with a one-way pseudonymous key, so that related
+reports can still be grouped. We keep the record to be able to defend or answer legal claims and to
+audit our own moderation decisions (Art. 17(3)(e)).
 
-Two honest limits on what that key is:
+**If the person a report is about deletes their account**, the report keeps its category, its dates and
+what the reporter wrote. The reporter's description is the evidence the retention exists to preserve,
+so it stays.
 
-- It **does not** let us recognise the same person if they sign up again. The key is derived from the
-  deleted account, and a new registration is a new account with a different key. We do not track
-  people across accounts.
-- It is **pseudonymisation, not anonymisation**. The retained report is still personal data, still
+**If the person who filed a report deletes their account**, the report keeps its category, its dates
+and the link to the reported content — but **the text they wrote is erased.** Their description of what
+happened is their own personal data, and once they have asked to be erased we have no basis to keep
+their account of events about someone else. What we keep is the fact that a complaint of that kind was
+made on that date, not their words. We do this rather than deleting the whole report because otherwise
+the person who reports harassment could, by leaving, destroy the record of a complaint about somebody
+else — including one we had not yet reviewed.
+
+Three honest limits:
+
+- Neither key lets us recognise the same person if they sign up again. Both are derived from the
+  deleted account, and a new registration is a new account with different keys. **We do not track
+  people across accounts.**
+- The two keys are deliberately different from each other, so we cannot use them to work out that the
+  person who filed one report is the person another report is about.
+- Both are **pseudonymisation, not anonymisation**. A retained report is still personal data, still
   covered by this policy, and still deleted on the schedule in the table above.
-
-Reports that the departing user **filed** are deleted along with their account.
 
 > **[[24 months from filing]] and [[18 months from resolution]] require sign-off by a qualified legal
 > professional.** These are engineering defaults chosen so the two cases expire at roughly the same
@@ -60,9 +72,11 @@ Reports that the departing user **filed** are deleted along with their account.
 
 **Note on unresolved reports about active accounts.** These have no expiry date, on purpose: the
 correct response to a report nobody has reviewed is to review it, not to have a scheduled job destroy
-an open safety complaint. The consequence is that the queue grows without limit if it is not worked;
+an open safety complaint. That holds whether or not the person who filed it has since left. The
+consequence is that the queue grows without limit if it is not worked;
 [MODERATION_PROCESS.md](../MODERATION_PROCESS.md) is the process that keeps it worked, and this is the
-reason it matters.
+reason it matters. A report where **both** people involved have deleted their accounts does have an
+expiry date — [[24 months]] from when it was filed — so it cannot be kept indefinitely.
 
 ## On account deletion
 

@@ -199,8 +199,8 @@ All four have RLS enabled with **no policies** and all privileges revoked from
 
 ### 4.10 Moderation data — `public.reports` (`…000300_social_tables.sql:52-62` + `…20260811000400_feed_reports.sql:3-5`)
 
-`id`, `reporter_id`, `reported_user_id` (required at insert, nullable thereafter — see below),
-`reported_user_key` (`not null`), `category` (`inappropriate_profile_image`,
+`id`, `reporter_id` and `reported_user_id` (both required at insert, both nullable thereafter — see
+below), `reporter_key` and `reported_user_key` (both `not null`), `category` (`inappropriate_profile_image`,
 `inappropriate_text`, `harassment`, `impersonation`, `underage_concern`, `other`,
 `inappropriate_post_image` — `…000100_extensions_and_enums.sql:27-34`,
 `…20260811000300_report_category_post_image.sql:4`), `details` (≤1000 chars of reporter-written
@@ -208,16 +208,33 @@ free text about a third party), `status` (`open`/`reviewing`/`actioned`/`dismiss
 `reviewed_at`, `post_id`, `comment_id` (at most one of the two — `…20260811000400`). The
 reporter can read their own reports (`…000700:74-75`); the reported person cannot.
 
-`reported_user_key` is a sha256 digest over a domain-separated string containing the reported
-account's id, stamped at insert and never rewritten. **Purpose:** a report survives deletion of the
-account it concerns — `reported_user_id`, `post_id` and `comment_id` are all `on delete set null` —
-and the key is what still allows reports about one former account to be grouped, on the Art. 17(3)(e)
-basis recorded in [DPIA.md](DPIA.md) §3.7. **Limits, stated because they are easy to overstate:** the
-key is pseudonymisation under Art. 4(5), not anonymisation — the retained row remains personal data
-with a retention clock (§7) — and it **cannot** link a person to a new account, because a new
-registration has a new account id and therefore an unrelated key. No cross-account identification is
-performed or intended. The operational detail is in
+`reported_user_key` and `reporter_key` are sha256 digests over domain-separated strings containing the
+relevant account's id, stamped at insert and never rewritten. **Purpose:** a report survives deletion of
+either party — `reporter_id`, `reported_user_id`, `post_id` and `comment_id` are all
+`on delete set null` — and the keys are what still allow reports about one former subject, or filed by
+one former reporter, to be grouped, on the Art. 17(3)(e) basis recorded in [DPIA.md](DPIA.md) §3.7.
+
+**Erasure on the reporter side.** When the reporting account is deleted, `details` is erased as well as
+de-linked. The invariant is a CHECK constraint,
+`report_details_erased_with_reporter (reporter_id is not null or details is null)`, not merely a
+trigger, so an erasure that failed to happen aborts the account deletion instead of passing silently.
+What is retained is the fact of a complaint of that category, on that date, about that subject,
+pointing at that content; what is erased is the reporter's narrative. For a post or comment report the
+reported content remains linked and is the substantive evidence; for a **user-level** report the free
+text may have been the only evidence, so such a retained row can record that a complaint existed
+without recording what it alleged.
+
+**Limits, stated because they are easy to overstate:** the keys are pseudonymisation under Art. 4(5),
+not anonymisation — the retained row remains personal data with a retention clock (§7) — and neither
+**can** link a person to a new account, because a new registration has a new account id and therefore
+unrelated keys in both roles. No cross-account identification is performed or intended. The two keys
+use **separate namespaces**, so a row's reporter key never equals another row's subject key and the two
+roles cannot be joined across de-linked rows. The operational detail is in
 [MODERATION_PROCESS.md](MODERATION_PROCESS.md) §6.
+
+A de-linked report is readable by **no client**: `reports_select_own` is `reporter_id = auth.uid()`,
+which matches nothing once that column is NULL, so those rows exist only for the operator via the
+dashboard.
 
 `status` and `reviewed_at` are written only by `public.review_report`
 (`…20260813000100_review_report.sql`), which is revoked from `public`/`anon`/`authenticated` and
@@ -315,10 +332,10 @@ category, the function that actually enforces it.
 | Comments | Soft-deleted by author; purged within 30 days | `purge_soft_deleted_comments(interval '30 days')` (`…000400:51-71`) | **No — unscheduled** |
 | Comments and cheers **by other users** on a purged post | Removed with the post | FK cascade from `posts` (`…20260811000100_feed_tables.sql:59,70`), documented deliberately at `…20260812000400:9-18` | Follows the (unscheduled) post purge |
 | Reports, resolved | 12–24 months after resolution | `purge_resolved_reports(interval '18 months', …)` (`…20260812000400_retention_purges.sql`) | **No — unscheduled.** Note this function had never deleted a row before `public.review_report` existed: its predicate needs `status` and `reviewed_at`, and nothing in the schema ever set either (`…20260813000100_review_report.sql`) |
-| Reports, unresolved, reported account still active | Published as having no defined period | **None, deliberately.** A scheduled job here would destroy open safety complaints; the control is working the queue ([MODERATION_PROCESS.md](MODERATION_PROCESS.md) §7) | No limit exists |
-| Reports, unresolved, reported account deleted | 24 months from filing | Second branch of `purge_resolved_reports`, keyed on `created_at` because a never-resolved report has no `reviewed_at` (`…20260812000400_retention_purges.sql`) | **No — unscheduled** |
+| Reports, unresolved, reported account still active | Published as having no defined period | **None, deliberately.** A scheduled job here would destroy open safety complaints; the control is working the queue ([MODERATION_PROCESS.md](MODERATION_PROCESS.md) §7). Applies whether or not the reporter has since left | No limit exists |
+| Reports, unresolved, reported account deleted (including rows whose reporter is also gone) | 24 months from filing | Second branch of `purge_resolved_reports`, keyed on `created_at` because a never-resolved report has no `reviewed_at`, and on `reported_user_id is null` so the fully de-linked row — no living party at all — cannot become an immortal orphan (`…20260812000400_retention_purges.sql`) | **No — unscheduled** |
 | Reports **about** a deleted account | Retained without the reported person's identity | `reported_user_id`, `post_id` and `comment_id` are `on delete set null`; `reported_user_key` keeps a pseudonym for the former subject (`…20260101000300_social_tables.sql`, `…20260811000400_feed_reports.sql`) | Yes — the row survives; its own clock (rows above) then applies |
-| Reports **filed by** a deleted account | Not published | `reporter_id` is still `on delete cascade` to `profiles`, which cascades from `auth.users` (`…000200_core_tables.sql:7`), so a departing user's own reports — including open reports about third parties — are destroyed with their account. Separate operator decision, not yet taken ([MODERATION_PROCESS.md](MODERATION_PROCESS.md) §8) | Immediate deletion, not retention |
+| Reports **filed by** a deleted account | Retained without the reporter's identity and **without the text they wrote** | `reporter_id` is `on delete set null`; `reporter_key` keeps a pseudonym; `details` is erased, enforced by `report_details_erased_with_reporter` (`…20260101000300_social_tables.sql`). Decided 2026-08-13 so that a reporter could not destroy the record of a complaint about a third party by leaving | Yes — the row survives, minus the reporter's prose; its own clock (rows above) then applies |
 | Friendships, blocks | Until removed / unblocked | `delete_account()` deletes both for the departing user (`…000850:277-278`) | Yes, on user request |
 | Friend tokens | Until revoked or regenerated | `regenerate_friend_token` revokes prior tokens (`…000800_rpc_social.sql:23-25`); `delete_account()` deletes them (`…000850:276`) | Yes |
 | Nudges | Not published | **None.** No purge function; removed only by the `profiles` cascade on account deletion | No limit exists |
@@ -499,15 +516,14 @@ than one that admits a gap.
    never deleted (`…20260812000200:55-64`), and `object_path` embeds the owner's uuid. No purge
    function covers this table, so a record that user X once had a photo at a given path — plus any
    `last_error` text — outlives both the photo and, potentially, the account.
-9. **Account deletion still destroys moderation reports filed *by* the deleted user** (narrowed
-   2026-08-13). Reports **about** a deleted account now survive, minimised and pseudonymised
-   (`…20260101000300_social_tables.sql`, `…20260811000400_feed_reports.sql`), which resolves the
-   contradiction with `docs/legal/ACCOUNT_DELETION_POLICY.md` and lets the retention clock in
-   `purge_resolved_reports` actually run. `reporter_id` still cascades, so a departing user's own
-   reports — including open reports about third parties — are destroyed with their account; that is a
-   separate decision the operator has not taken ([MODERATION_PROCESS.md](MODERATION_PROCESS.md) §8).
-   Outstanding for the part that was done: counsel sign-off on the Art. 17(3)(e) basis and on the
-   18-month / 24-month periods. See [DPIA.md](DPIA.md) §3.7.
+9. **Closed in the schema 2026-08-13; counsel sign-off outstanding.** Reports now survive deletion of
+   **either** party, minimised and pseudonymised (`…20260101000300_social_tables.sql`,
+   `…20260811000400_feed_reports.sql`), which resolves the contradiction with
+   `docs/legal/ACCOUNT_DELETION_POLICY.md` and lets the retention clock in `purge_resolved_reports`
+   actually run. A departing reporter's own free text is erased rather than retained. What remains open
+   is legal, not structural: counsel must confirm the Art. 17(3)(e) basis, the 18-month / 24-month
+   periods, and that erasing the reporter's text while keeping the rest is the right balance for a
+   user-level report where that text was the only evidence. See [DPIA.md](DPIA.md) §3.7.
 10. **Supabase region unchosen**, so third-country transfer status is undetermined (§6).
 11. **The feed is backend-only on this revision.** No feed screens, and no post/comment/cheer RPC
     contracts, exist in the app (`CheekyPint/Features/` contains no feed feature; no Swift file

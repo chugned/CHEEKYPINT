@@ -327,8 +327,8 @@ and no cover when the operator is unavailable.
 
 ### 3.7 Risk 7 — account deletion erases the moderation record about the deleted user
 
-**Status: decided by the operator on 2026-08-13 and implemented for `reported_user_id`. Partially
-remaining for `reporter_id`. Counsel sign-off on the retention period is still outstanding.**
+**Status: decided by the operator on 2026-08-13 and implemented for BOTH parties. Counsel sign-off on
+the retention period and on the Art. 17(3)(e) basis is still outstanding.**
 
 **What the system did.** `reports.reporter_id` and `reports.reported_user_id` both cascaded from
 `profiles`, and `profiles` cascades from `auth.users` (`…20260101000200_core_tables.sql:7`). The
@@ -373,11 +373,46 @@ id can recompute the key and confirm which rows concerned that account. That con
 deliberate — it is what makes the record useful for the Art. 17(3)(e) purpose — and it is why the row
 carries a retention clock rather than being treated as anonymous.
 
-**Residual.** `reporter_id` still cascades, so a report **filed by** a departing user is still
-destroyed, including an open report about a third party; that is a separate operator decision, not yet
-taken (`docs/MODERATION_PROCESS.md` §8). A retained report also no longer records whether it concerned
-a post, a comment, or the account as a whole, since both content links are cleared — `category` is the
-only surviving hint. And the retention numbers are engineering defaults chosen for internal
+**The reporter side (second decision, same day).** `reporter_id` cascaded too, which made the reporter
+the one party able to unilaterally destroy a live safety complaint **about a third party**, including an
+unreviewed one, by exercising their own Art. 17 right. It is now `on delete set null` with a
+`reporter_key` pseudonym — **and the reporter's `details` free text is ERASED**, not merely de-linked.
+
+That asymmetry is the substance of the decision, not an implementation detail. `details` is up to 1,000
+characters written *by* the reporter, so it is their personal data as much as it is evidence about
+someone else. Retaining a *subject's* report against their erasure request rests on Art. 17(3)(e), and
+the reporter's text is the evidence that does the defending — so it survives the subject's departure.
+No equivalent basis exists for keeping a departing reporter's narrative about a third party once they
+have asked to be erased, so what is retained is the **signal** (a complaint of this category, on this
+date, about this subject, pointing at this content) and what is erased is the **narrative**. This is a
+data-minimisation outcome under Art. 5(1)(c) as much as an Art. 17 one.
+
+Mechanism, because the failure mode matters: `ON DELETE SET NULL` cannot clear a non-FK column, so the
+erasure needs a trigger — and a trigger performing an *erasure* fails in the opposite direction to one
+stamping a value. If it stopped firing, the result would be a de-linked row that quietly **kept** the
+departed reporter's prose: an erasure that silently did not happen. The guarantee is therefore a CHECK
+constraint, `report_details_erased_with_reporter (reporter_id is not null or details is null)`, with the
+trigger merely satisfying it. If the trigger is dropped, disabled or recreated wrongly, the FK's own
+set-null violates the CHECK and the entire account deletion **aborts in the same transaction**, so the
+outcome is either a complete erasure or no deletion at all — never a half-erased report. Asserted in the
+RLS/RPC suite by disabling the trigger and attempting a real deletion.
+
+The two pseudonyms use **separate namespaces**, so `report_reporter_key(X) ≠ report_subject_key(X)`. A
+shared namespace would have let any two rows be joined reporter-to-subject — "the person who filed A is
+the person B is about" — across the whole retained corpus with no account id in hand, which is a
+re-identification path the de-linking exists to close. Art. 5(1)(c): the correlation is not needed by
+either role's purpose, so it is not created. An operator who legitimately holds an account id can still
+compute and compare both keys for that one person.
+
+**Residual.** A retained report no longer records whether it concerned a post, a comment, or the account
+as a whole, since the content links are cleared with the subject — `category` is the only surviving hint.
+Where a reporter has departed, an **account-level** report may retain no evidence at all: for post and
+comment reports the reported content is still linked and is the real evidence, but for a user-level
+report the free text may have been the only evidence there ever was, so the retained row can record that
+a complaint existed without recording what it alleged. That is a genuine loss of the record's usefulness,
+accepted as the price of not retaining an erased person's prose, and stated as such rather than implied
+to be free. Reports about a **live** account that were never resolved remain unbounded, whether or not
+their reporter has left (§3.8). And the retention numbers are engineering defaults chosen for internal
 consistency, not legal advice. **Residual risk: low likelihood, low-to-moderate severity, mitigated in
 the schema and asserted in the RLS/RPC suite; the period itself is
 `[[outstanding — counsel sign-off on 18 months / 24 months, and on the Art. 17(3)(e) justification
@@ -403,7 +438,12 @@ categories have no purge function at all, so they are unbounded by design rather
 Unresolved reports about a **live** account are outside `purge_resolved_reports`'s predicate and so
 are also unbounded — now deliberately rather than by omission, since the alternative is a scheduled job
 that destroys open safety complaints (`docs/legal/DATA_RETENTION_POLICY.md`,
-`docs/MODERATION_PROCESS.md` §7). Working the queue is the control; §4.3 carries it.
+`docs/MODERATION_PROCESS.md` §7). That holds whether or not the reporter has since departed: a departed
+reporter makes a complaint about a live account harder to follow up, which argues for triaging sooner,
+not for deleting. Working the queue is the control; §4.3 carries it. The **fully** de-linked row — both
+parties gone — is bounded, at 24 months from `created_at`: it has no living party left to trigger any
+other cleanup, so the purge branch keys on `reported_user_id is null` specifically to catch it, and the
+suite asserts that it does.
 
 **Updated 2026-08-13 — `purge_resolved_reports` was not merely unscheduled, it was unreachable.** Its
 predicate required `reports.status` and `reports.reviewed_at`, and until `public.review_report`
@@ -539,14 +579,15 @@ moderator or service-role actions (`docs/MODERATION.md:163` lists an audit log a
 | @-mentions restricted to the commenter's own friends; a mention that would leak a third party's hidden relationship is dropped silently rather than rejected distinguishably | `…20260811000600_rpc_feed_social.sql:106-114` | 3.4, 3.6 |
 | Reporting for accounts, posts and comments into one queue | `…20260101000800_rpc_social.sql:204-228`; `…20260811000700_rpc_feed_reports.sql:4-76` | 3.2, 3.6 |
 | The queue can be *answered*, not only written: one service-role transition function stamps the review outcome, with a CHECK making the resolved-but-unstamped (therefore unpurgeable) state unrepresentable | `…20260813000100_review_report.sql`; constraint in `…20260101000300_social_tables.sql`; process in [MODERATION_PROCESS.md](MODERATION_PROCESS.md) | 3.6, 3.8 |
-| Reports survive deletion of the reported account in minimised, pseudonymised form, with a bounded lifetime — not cross-account identification | `…20260101000300_social_tables.sql`; `…20260811000400_feed_reports.sql`; `…20260812000400_retention_purges.sql` | 3.7 |
+| Reports survive deletion of EITHER party in minimised, pseudonymised form, with a bounded lifetime — not cross-account identification. A departing reporter's own free text is erased, guaranteed by a CHECK constraint so the erasure cannot silently fail | `…20260101000300_social_tables.sql`; `…20260811000400_feed_reports.sql`; `…20260812000400_retention_purges.sql` | 3.7 |
+| The subject and reporter pseudonyms use separate namespaces, so the two roles cannot be joined across de-linked rows | `public.report_party_key` / `report_subject_key` / `report_reporter_key` (`…20260101000300_social_tables.sql`) | 3.7, 3.14 |
 | Erasure spans database, both storage buckets and the auth user, aborting before auth deletion if storage cleanup fails so the request stays retryable; the app invokes the Edge Function rather than the bare RPC, pinned by a regression test | `…20260101000850_rpc_pints_sessions.sql:254-284`; `supabase/functions/delete-account/index.ts:45-70`; `CheekyPint/Core/Database/ProfileRepository.swift:98-101`; `CheekyPintTests/DeleteAccountWiringTests.swift:52-61` | 3.5, 3.8 |
 | Deferred byte deletion: the path is captured in the same statement that soft-deletes the post, because the row is its only record | `…20260812000300_enqueue_deleted_post_images.sql:44-48`; drained by `supabase/functions/storage-gc/index.ts:57-100` | 3.5, 3.8 |
 | Self-service export scoped to `auth.uid()` in every subquery, bounded at 10,000 rows per collection with a `truncated` flag, live credentials excluded | `…20260812000500_export_my_data.sql:81-403`, cap `:89`, exclusions `:63-72` | 3.9 |
 | Never celebrates heavy or rapid drinking: confirmation tone is replaced by a neutral welfare message when entries cluster, computed on device and stored nowhere | `CheekyPintCore/…/WelfareMonitor.swift:11-45` | Welfare (not a GDPR risk, recorded for completeness) |
 | No third-party SDKs; analytics a no-op with a nine-event, no-personal-data allowlist | `project.yml:26-28,53-55`; `CheekyPint/Core/Analytics/AnalyticsService.swift:6-29` | 3.6, 3.13 |
 | Service-role key confined to Edge Function environments; `storage-gc` requires the key itself, not merely a user JWT | `supabase/functions/delete-account/index.ts:12`; `supabase/functions/storage-gc/index.ts:49-51` | 3.15 |
-| Automated verification of allowed and denied paths across RLS and every RPC | `supabase/tests/rls_rpc_suite.sql` via `supabase/tests/run_local_pg.sh` — 106 checks pass on this revision | all technical |
+| Automated verification of allowed and denied paths across RLS and every RPC | `supabase/tests/rls_rpc_suite.sql` via `supabase/tests/run_local_pg.sh` — 114 checks pass on this revision | all technical |
 
 ### 4.2 Measures required before launch — legal
 
@@ -554,7 +595,7 @@ moderator or service-role actions (`docs/MODERATION.md:163` lists an audit log a
 |---|---|---|
 | L1 | **Obtain qualified Austrian legal advice on the Art. 9 classification of the drink diary**, and implement whatever follows: lawful basis, explicit-consent flow and withdrawal path if required, DPO reassessment, corrections to `docs/legal/PRIVACY_POLICY.md:28` and `docs/APP_PRIVACY_DATA_MAPPING.md:31` | 3.1 |
 | L2 | Review of all `docs/legal/*` templates and completion of every `[[placeholder]]` | 3.13, all |
-| L3 | **Partly done (2026-08-13).** Reports about a deleted account now survive, minimised and pseudonymised, on the Art. 17(3)(e) basis recorded in §3.7. Still outstanding: counsel sign-off on that basis and on the 18-month / 24-month periods, and the separate decision on reports *filed by* a departing user ([MODERATION_PROCESS.md](MODERATION_PROCESS.md) §8) | 3.7 |
+| L3 | **Schema done (2026-08-13), sign-off outstanding.** Reports survive deletion of either party, minimised and pseudonymised, on the Art. 17(3)(e) basis recorded in §3.7; a departing reporter's free text is erased. Counsel must still confirm that basis, the 18-month / 24-month periods, and — specifically — that erasing the reporter's text while retaining the rest is the right balance for a user-level report where that text was the only evidence | 3.7 |
 | L4 | Decide the basis for withholding report contents from a reported data subject who makes an access request | 3.14 |
 | L5 | Choose the Supabase region, execute and reference the Art. 28 DPA, and complete the transfer section | 3.13 |
 | L6 | Assess whether self-declared age is defensible for this content | 3.12 |

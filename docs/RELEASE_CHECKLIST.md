@@ -37,9 +37,11 @@
       actually be met. It is deliberately not published to users as a promise
 - [ ] Replace the `support@cheekypint.app` placeholder with a live, monitored address — guideline 1.2
       requires published contact information
-- [ ] Decide the open question in its §8: whether reports **filed by** a user should survive that
-      user deleting their account. Today they do not (`reports.reporter_id` still cascades), so an
-      open report about a third party disappears when its reporter leaves
+- [ ] Note the consequence of the §8 decision (reports filed by a departing user are retained, with
+      their free text erased): a queue read can contain reports with no reporter to follow up with and
+      no description, so for an **account-level** report there may be nothing left to adjudicate on.
+      `dismissed` is the honest outcome for those. Counsel should confirm that trade-off, not just the
+      retention periods
 
 ## App configuration
 

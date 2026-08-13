@@ -33,8 +33,14 @@ confirm, and may ask you to re-authenticate.
   grouped together; it **cannot** recognise you if you sign up again, because a new account is a new
   identity to us. These reports are deleted on the schedule in the
   [Data Retention Policy](DATA_RETENTION_POLICY.md).
-- **Reports you filed are deleted with your account.** Note this includes reports you made about
-  other people, even if they had not yet been reviewed.
+- **Reports you filed are kept, without your identity and without your words.** We remove the link to
+  your account and **erase the description you wrote**, keeping only the fact that a report of that
+  category was made on that date, who or what it was about, and the reported post or comment if there
+  was one. We keep that much because otherwise someone who reports harassment could erase the record of
+  their complaint about another person simply by closing their account — including a complaint we had not
+  yet reviewed. We erase your description because those are your words about someone else, and once you
+  have asked to be erased we have no good reason to keep them. These reports are deleted on the schedule
+  in the [Data Retention Policy](DATA_RETENTION_POLICY.md).
 - Residual copies in encrypted backups roll off on the backup schedule.
 - Anonymous, non-identifying aggregate analytics are unaffected.
 
