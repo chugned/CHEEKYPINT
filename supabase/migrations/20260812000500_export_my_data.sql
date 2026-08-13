@@ -269,7 +269,15 @@ begin
 
   -- reports: scoped by reporter_id = caller's own uid — reports the caller FILED, never
   -- reports filed against them. `reported_user_id` is deliberately omitted — see judgement
-  -- call 3 above.
+  -- call 3 above — and so is `reported_user_key`
+  -- (20260101000300_social_tables.sql), for the same reason: it is a pseudonym FOR THE ACCUSED
+  -- PARTY, so exporting it would re-introduce exactly the third-party identifier the omission of
+  -- reported_user_id exists to withhold.
+  --
+  -- A report whose subject has since deleted their account (reported_user_id de-linked to NULL)
+  -- still belongs to its reporter and still exports: nothing here filters on the subject, only on
+  -- reporter_id. Asserted in the suite, because the omission of reported_user_id means the
+  -- pre-existing assertions cannot tell a retained report from an ordinary one.
   select count(*) into v_total from public.reports r where r.reporter_id = v_uid;
   if v_total > v_cap then v_truncated := true; end if;
   select coalesce(jsonb_agg(jsonb_build_object(

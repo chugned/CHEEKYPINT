@@ -1705,6 +1705,650 @@ begin
   raise notice 'PASS t55: posts.body and post_comments.body keep their line breaks; place_label stays single-line';
 end $$;
 
+-- ============================ MODERATION QUEUE: review + retention ============================
+-- Everything below concerns the two 2026-08-13 operator decisions: public.review_report (the queue
+-- was write-only — nothing in the schema ever set reports.status or reports.reviewed_at, so
+-- purge_resolved_reports was dead code) and report retention across deletion of the reported
+-- account (reported_user_id was `not null on delete cascade`, so a reported user erased every report
+-- about them by deleting their account).
+--
+-- Four throwaway users are created here rather than reusing Alice/Barnaby/Ceri/Dev because one of
+-- them gets DELETED, which no earlier fixture can survive. They are added at the very end of the
+-- suite, after every count-based assertion above has already run, so they cannot disturb anything.
+-- Inserting into auth.users fires handle_new_user(), which creates the profiles + privacy_settings
+-- rows (needed for export_my_data in t61).
+--
+--   Rhian  …f1  reporter, survives
+--   Sion   …f2  reported, DELETED in t61
+--   Teilo  …f3  reported, survives (control: a different subject must get a different key)
+--   Una    …f4  second reporter about Sion (control: same subject must get the SAME key)
+reset role;
+do $$ begin
+  insert into auth.users (instance_id, id, aud, role, email, created_at, updated_at)
+  values
+    ('00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-0000000000f1',
+     'authenticated', 'authenticated', 'rhian@cheekypint.test', now(), now()),
+    ('00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-0000000000f2',
+     'authenticated', 'authenticated', 'sion@cheekypint.test', now(), now()),
+    ('00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-0000000000f3',
+     'authenticated', 'authenticated', 'teilo@cheekypint.test', now(), now()),
+    ('00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-0000000000f4',
+     'authenticated', 'authenticated', 'una@cheekypint.test', now(), now())
+  on conflict (id) do nothing;
+
+  -- Rhian and Sion must be accepted friends so Rhian can see (and therefore report) Sion's post.
+  -- Inserted directly as the owner: this is fixture plumbing, not the behaviour under test, and the
+  -- friend-request RPCs are already exercised at length earlier in the suite.
+  insert into public.friendships (requester_id, addressee_id, status, responded_at)
+  values ('00000000-0000-4000-8000-0000000000f1', '00000000-0000-4000-8000-0000000000f2',
+          'accepted', now())
+  on conflict do nothing;
+
+  raise notice 'PASS t56 setup: four throwaway moderation fixtures created (Rhian, Sion, Teilo, Una)';
+end $$;
+
+-- t56: the pseudonymous subject key is stamped on every report at INSERT time, is stable per
+-- subject, differs per subject, and matches public.report_subject_key. This is the value the whole
+-- retention decision rests on: if it were not present BEFORE the subject is deleted, t61 would have
+-- nothing to retain.
+--
+-- Also pins the insert-time gate that replaces the old `not null` on reported_user_id: the column is
+-- nullable so a report can OUTLIVE its subject, not so a report can be filed about nobody.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000f1';
+do $$
+declare
+  v jsonb; v_key_sion text; v_key_sion2 text; v_key_teilo text; v_expected text;
+  v_state text; v_msg text;
+begin
+  select public.report_user('00000000-0000-4000-8000-0000000000f2', 'harassment',
+                            't56: rhian reports sion') into v;
+  select reported_user_key into v_key_sion from public.reports where id = (v->>'report_id')::uuid;
+
+  v_expected := public.report_subject_key('00000000-0000-4000-8000-0000000000f2');
+  if v_key_sion is distinct from v_expected then
+    raise exception 'FAIL t56: stamped key % does not match report_subject_key %',
+                    quote_literal(v_key_sion), quote_literal(v_expected); end if;
+  if v_key_sion !~ '^[0-9a-f]{64}$' then
+    raise exception 'FAIL t56: key % is not a 64-char hex digest', quote_literal(v_key_sion); end if;
+
+  -- A DIFFERENT subject must get a different key, or the key groups nothing.
+  select public.report_user('00000000-0000-4000-8000-0000000000f3', 'other',
+                            't56: rhian reports teilo') into v;
+  select reported_user_key into v_key_teilo from public.reports where id = (v->>'report_id')::uuid;
+  if v_key_teilo = v_key_sion then
+    raise exception 'FAIL t56: two different subjects share the key %', quote_literal(v_key_sion); end if;
+
+  -- The SAME subject must get the same key even from a different reporter, or retained reports
+  -- about one former account cannot be grouped.
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000f4', false);
+  select public.report_user('00000000-0000-4000-8000-0000000000f2', 'inappropriate_text',
+                            't56: una reports sion') into v;
+  select reported_user_key into v_key_sion2 from public.reports where id = (v->>'report_id')::uuid;
+  if v_key_sion2 is distinct from v_key_sion then
+    raise exception 'FAIL t56: same subject got keys % and % from two reporters',
+                    quote_literal(v_key_sion), quote_literal(v_key_sion2); end if;
+
+  -- A brand-new report must still name a live account. Asserted on the exact message, not merely
+  -- "some error": a NOT NULL violation on reported_user_key would also be "some error" and would
+  -- mean the guard itself had been deleted.
+  reset role;
+  v_state := 'NO ERROR'; v_msg := null;
+  begin
+    insert into public.reports (reporter_id, reported_user_id, category)
+    values ('00000000-0000-4000-8000-0000000000f1', null, 'other');
+  exception when others then v_state := sqlstate; v_msg := sqlerrm;
+  end;
+  if v_state is distinct from '23502' then
+    raise exception 'FAIL t56: subject-less insert gave sqlstate % (want 23502)', v_state; end if;
+  if v_msg is distinct from 'A report must name the account it is about' then
+    raise exception 'FAIL t56: subject-less insert message % (want the explicit guard)', quote_literal(v_msg); end if;
+
+  raise notice 'PASS t56: reported_user_key is stamped at insert, stable per subject, distinct across subjects; a new report must still name an account';
+end $$;
+
+-- t57: review_report transitions the report and gets reviewed_at right.
+--
+-- reviewed_at is the retention clock's zero point, so each of these four properties changes how long
+-- a report is kept:
+--   * 'reviewing' must NOT stamp it (the review has started, not concluded) — stamping there would
+--     start the 18-month clock at triage time and destroy the report EARLY.
+--   * 'actioned'/'dismissed' must stamp it, or purge_resolved_reports can never match the row.
+--   * re-running the same outcome must NOT re-stamp it, or a second click restarts the clock.
+--   * going back to 'reviewing' must CLEAR it, or a resolved-then-reopened report keeps a
+--     conclusion time it no longer has (and violates report_reviewed_at_matches_status).
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000f1';
+do $$
+declare
+  v jsonb; v_id uuid; v_status public.report_status; v_reviewed timestamptz; v_first timestamptz;
+begin
+  select public.report_user('00000000-0000-4000-8000-0000000000f3', 'impersonation',
+                            't57: report to be reviewed') into v;
+  v_id := (v->>'report_id')::uuid;
+  if (v->>'status') is distinct from 'open' then
+    raise exception 'FAIL t57: a new report is % (want open)', v->>'status'; end if;
+
+  reset role;
+
+  -- reviewing: status moves, reviewed_at stays NULL.
+  select public.review_report(v_id, 'reviewing') into v;
+  if (v->>'status') is distinct from 'reviewing' then
+    raise exception 'FAIL t57: review_report returned status %', v->>'status'; end if;
+  if (v->>'previous_status') is distinct from 'open' then
+    raise exception 'FAIL t57: previous_status % (want open)', v->>'previous_status'; end if;
+  select status, reviewed_at into v_status, v_reviewed from public.reports where id = v_id;
+  if v_status is distinct from 'reviewing' then
+    raise exception 'FAIL t57: stored status % (want reviewing)', v_status; end if;
+  if v_reviewed is not null then
+    raise exception 'FAIL t57: reviewing stamped reviewed_at = % (must stay NULL: it is the retention clock)', v_reviewed; end if;
+
+  -- actioned: reviewed_at is stamped.
+  select public.review_report(v_id, 'actioned') into v;
+  if (v->>'reviewed_at') is null then
+    raise exception 'FAIL t57: actioned returned a null reviewed_at'; end if;
+  select status, reviewed_at into v_status, v_first from public.reports where id = v_id;
+  if v_status is distinct from 'actioned' then
+    raise exception 'FAIL t57: stored status % (want actioned)', v_status; end if;
+  if v_first is null then
+    raise exception 'FAIL t57: actioned did not stamp reviewed_at — purge_resolved_reports can never match this row'; end if;
+
+  -- Re-running the same outcome must not restart the clock.
+  --
+  -- Asserted against a reviewed_at that has been deliberately AGED first. The obvious version of
+  -- this assertion — call review_report twice and compare the two timestamps — cannot fail:
+  -- `now()` is the TRANSACTION timestamp and this whole do-block is one transaction, so a
+  -- re-stamping mutation writes the identical value and pg_sleep() changes nothing. Confirmed by
+  -- mutation testing: the first draft of this check stayed green with the idempotence branch of
+  -- review_report deleted outright.
+  update public.reports set reviewed_at = now() - interval '5 months' where id = v_id;
+  select reviewed_at into v_first from public.reports where id = v_id;
+  perform public.review_report(v_id, 'actioned');
+  select reviewed_at into v_reviewed from public.reports where id = v_id;
+  if v_reviewed is distinct from v_first then
+    raise exception 'FAIL t57: re-running actioned moved reviewed_at from % to % (restarted the retention clock)',
+                    v_first, v_reviewed; end if;
+
+  -- Re-opening the review clears the conclusion time.
+  perform public.review_report(v_id, 'reviewing');
+  select status, reviewed_at into v_status, v_reviewed from public.reports where id = v_id;
+  if v_status is distinct from 'reviewing' or v_reviewed is not null then
+    raise exception 'FAIL t57: re-opened report is (%, %) (want reviewing, NULL)', v_status, v_reviewed; end if;
+
+  -- Changing the outcome IS a new conclusion, so it does re-stamp.
+  select public.review_report(v_id, 'dismissed') into v;
+  select status, reviewed_at into v_status, v_reviewed from public.reports where id = v_id;
+  if v_status is distinct from 'dismissed' or v_reviewed is null then
+    raise exception 'FAIL t57: dismissed report is (%, %) (want dismissed, a timestamp)', v_status, v_reviewed; end if;
+
+  raise notice 'PASS t57: review_report transitions status; reviewing leaves reviewed_at NULL, outcomes stamp it, a repeat outcome does not restart the clock, and re-opening clears it';
+end $$;
+
+-- t57b: report_reviewed_at_matches_status makes the dead-purge state UNREPRESENTABLE.
+--
+-- This is the constraint that stops the queue silently returning to how it was: a resolved report
+-- with a NULL reviewed_at is invisible to purge_resolved_reports and therefore immortal. The operator
+-- works in the Supabase dashboard SQL editor as the table owner, where nothing prevents a hand-typed
+-- `update reports set status = 'actioned'` — except this. Both directions are asserted, since the
+-- constraint is an equivalence: an outcome without a timestamp, and a timestamp without an outcome.
+--
+-- Added after mutation testing showed that replacing the whole constraint with `check (true)` left
+-- the suite green.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000f1';
+do $$
+declare v jsonb; v_id uuid; v_state text; begin
+  select public.report_user('00000000-0000-4000-8000-0000000000f3', 'other',
+                            't57b: report for the constraint checks') into v;
+  v_id := (v->>'report_id')::uuid;
+  reset role;
+
+  v_state := 'NO ERROR';
+  begin update public.reports set status = 'actioned' where id = v_id;
+  exception when others then v_state := sqlstate; end;
+  if v_state is distinct from '23514' then
+    raise exception 'FAIL t57b: resolving a report without stamping reviewed_at gave sqlstate % (want 23514) — such a row is immortal, because purge_resolved_reports needs reviewed_at', v_state; end if;
+
+  v_state := 'NO ERROR';
+  begin update public.reports set reviewed_at = now() where id = v_id;
+  exception when others then v_state := sqlstate; end;
+  if v_state is distinct from '23514' then
+    raise exception 'FAIL t57b: stamping reviewed_at on an unresolved report gave sqlstate % (want 23514)', v_state; end if;
+
+  -- ...and the row is untouched, so neither attempt half-applied.
+  if (select status from public.reports where id = v_id) is distinct from 'open'
+     or (select reviewed_at from public.reports where id = v_id) is not null then
+    raise exception 'FAIL t57b: a rejected manual update still changed the row'; end if;
+
+  raise notice 'PASS t57b: a resolved report without reviewed_at (and vice versa) is rejected by the table itself, so a hand-typed dashboard UPDATE cannot recreate the unpurgeable state';
+end $$;
+
+-- t58: review_report's rejections, asserted on the exact SQLSTATE **and** the exact message.
+--
+-- SQLSTATE alone is not enough here: 'open' and a nonexistent id would both be "some exception" to a
+-- bare handler, and both guards raise from the same function, so matching only 22023 would let the
+-- unknown-id guard stand in for the open guard. `v_state := 'NO ERROR'` before each attempt means a
+-- silently SUCCESSFUL call fails the assertion too — there is no handler that can swallow a pass.
+reset role;
+do $$
+declare
+  v jsonb; v_id uuid; v_state text; v_msg text; v_status public.report_status;
+begin
+  set role authenticated;
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000f1', false);
+  select public.report_user('00000000-0000-4000-8000-0000000000f3', 'other',
+                            't58: report for the rejection checks') into v;
+  v_id := (v->>'report_id')::uuid;
+  reset role;
+
+  -- 'open' is the initial state, not a review outcome.
+  v_state := 'NO ERROR'; v_msg := null;
+  begin perform public.review_report(v_id, 'open');
+  exception when others then v_state := sqlstate; v_msg := sqlerrm; end;
+  if v_state is distinct from '22023' then
+    raise exception 'FAIL t58: review_report(_, open) gave sqlstate % (want 22023)', v_state; end if;
+  if v_msg is distinct from 'review_report: open is a report''s initial state, not a review outcome' then
+    raise exception 'FAIL t58: review_report(_, open) message % (want the open-specific guard)', quote_literal(v_msg); end if;
+
+  -- A NULL target status is rejected on its own message rather than reaching the UPDATE and dying on
+  -- the column's NOT NULL.
+  v_state := 'NO ERROR'; v_msg := null;
+  begin perform public.review_report(v_id, null);
+  exception when others then v_state := sqlstate; v_msg := sqlerrm; end;
+  if v_state is distinct from '22023' then
+    raise exception 'FAIL t58: review_report(_, null) gave sqlstate % (want 22023)', v_state; end if;
+  if v_msg is distinct from 'review_report: a target status is required (reviewing, actioned or dismissed)' then
+    raise exception 'FAIL t58: review_report(_, null) message %', quote_literal(v_msg); end if;
+
+  -- Neither rejection may have changed the row.
+  select status into v_status from public.reports where id = v_id;
+  if v_status is distinct from 'open' then
+    raise exception 'FAIL t58: a rejected transition still changed the status to %', v_status; end if;
+
+  -- An unknown id names itself in the message, so the operator can see they pasted the wrong uuid.
+  v_state := 'NO ERROR'; v_msg := null;
+  begin perform public.review_report('00000000-0000-4000-8000-00000000dead', 'actioned');
+  exception when others then v_state := sqlstate; v_msg := sqlerrm; end;
+  if v_state is distinct from 'P0002' then
+    raise exception 'FAIL t58: review_report(unknown id) gave sqlstate % (want P0002)', v_state; end if;
+  if v_msg is distinct from 'review_report: no report with id 00000000-0000-4000-8000-00000000dead' then
+    raise exception 'FAIL t58: unknown-id message % (want the id echoed back)', quote_literal(v_msg); end if;
+
+  raise notice 'PASS t58: review_report rejects open, a null status and an unknown id, each on its own message, and changes nothing when it refuses';
+end $$;
+
+-- t59: review_report is SERVICE ROLE ONLY, asserted on the FUNCTION privilege.
+--
+-- Asserting "the call failed" would not prove the revoke: _shim_grants.sql grants `authenticated`
+-- table-level DML on every table in public, so a client failing to change a report could equally be
+-- RLS doing the work, and a call failing inside the function body for an unrelated reason looks
+-- identical to a privilege denial. has_function_privilege reads the grant itself. The 42501 check
+-- then confirms the grant is what actually stops the call at runtime, and the direct-UPDATE check
+-- confirms there is no way around the function either.
+--
+-- purge_resolved_reports is included because this change altered its signature (a second interval
+-- parameter), and a signature change is exactly how a `revoke` silently stops applying.
+reset role;
+do $$
+declare v_state text;
+begin
+  if has_function_privilege('authenticated', 'public.review_report(uuid, public.report_status)', 'execute') then
+    raise exception 'FAIL t59: authenticated holds EXECUTE on review_report'; end if;
+  if has_function_privilege('anon', 'public.review_report(uuid, public.report_status)', 'execute') then
+    raise exception 'FAIL t59: anon holds EXECUTE on review_report'; end if;
+  if not has_function_privilege('service_role', 'public.review_report(uuid, public.report_status)', 'execute') then
+    raise exception 'FAIL t59: service_role cannot EXECUTE review_report — the operator surface is unusable'; end if;
+
+  if has_function_privilege('authenticated', 'public.purge_resolved_reports(interval, interval)', 'execute') then
+    raise exception 'FAIL t59: authenticated holds EXECUTE on purge_resolved_reports (did the revoke follow the new signature?)'; end if;
+  if has_function_privilege('anon', 'public.purge_resolved_reports(interval, interval)', 'execute') then
+    raise exception 'FAIL t59: anon holds EXECUTE on purge_resolved_reports'; end if;
+
+  -- And the grant is what stops the call, at runtime, with the privilege error — not an application
+  -- guard that could be edited away.
+  set role authenticated;
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000f1', false);
+  v_state := 'NO ERROR';
+  begin perform public.review_report('00000000-0000-4000-8000-00000000dead', 'actioned');
+  exception when others then v_state := sqlstate; end;
+  reset role;
+  if v_state is distinct from '42501' then
+    raise exception 'FAIL t59: a client calling review_report got sqlstate % (want 42501 insufficient_privilege)', v_state; end if;
+
+  raise notice 'PASS t59: review_report and purge_resolved_reports are service-role only, by function privilege, and a client call is refused with 42501';
+end $$;
+
+-- ...and there is no way around the RPC: a reporter holding table DML still cannot transition their
+-- own report, because public.reports has a SELECT policy only. `status = 'reviewing'` is used rather
+-- than an outcome so that IF the update were permitted it would succeed and be caught here, instead
+-- of tripping report_reviewed_at_matches_status and aborting with a confusing message.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000f1';
+do $$ declare v_id uuid; n int; begin
+  select id into v_id from public.reports
+   where reporter_id = '00000000-0000-4000-8000-0000000000f1' and status = 'open' limit 1;
+  if v_id is null then raise exception 'FAIL t59: no open report of Rhian''s to attempt an update on'; end if;
+  update public.reports set status = 'reviewing' where id = v_id;
+  get diagnostics n = row_count;
+  if n <> 0 then
+    raise exception 'FAIL t59: a reporter directly transitioned % of their own reports', n; end if;
+  raise notice 'PASS t59: a reporter cannot transition a report by direct UPDATE (no UPDATE policy on public.reports)';
+end $$;
+
+-- t60: purge_resolved_reports ACTUALLY DELETES a row. This function has never deleted anything in
+-- its life — its predicate needed reports.status and reports.reviewed_at, and until review_report
+-- existed nothing in the schema ever set either, so the 18-month commitment in
+-- docs/legal/DATA_RETENTION_POLICY.md was unenforceable in principle rather than merely unscheduled.
+--
+-- Asserted on the identity of the specific row, plus two controls, so the assertion cannot pass on a
+-- purge that deletes indiscriminately: an actioned report INSIDE the window and an aged report that
+-- was never resolved must both survive the same call.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000f4';
+do $$
+declare v jsonb; v_aged uuid; v_fresh uuid; v_open uuid; purged int; begin
+  select public.report_user('00000000-0000-4000-8000-0000000000f3', 'harassment',
+                            't60: actioned and aged past the window') into v;
+  v_aged := (v->>'report_id')::uuid;
+  select public.report_user('00000000-0000-4000-8000-0000000000f3', 'harassment',
+                            't60: actioned but still inside the window') into v;
+  v_fresh := (v->>'report_id')::uuid;
+  select public.report_user('00000000-0000-4000-8000-0000000000f3', 'harassment',
+                            't60: aged but never resolved') into v;
+  v_open := (v->>'report_id')::uuid;
+
+  reset role;
+  perform public.review_report(v_aged, 'actioned');
+  perform public.review_report(v_fresh, 'actioned');
+
+  -- Age the resolved one past the retention window, and the open one past it too (by created_at, so
+  -- the resolved-branch predicate has a same-age row it must NOT touch).
+  update public.reports set reviewed_at = now() - interval '19 months' where id = v_aged;
+  update public.reports set created_at = now() - interval '19 months' where id = v_open;
+
+  select public.purge_resolved_reports(interval '18 months') into purged;
+  if purged < 1 then
+    raise exception 'FAIL t60: purge_resolved_reports removed % rows (want >= 1) — the queue is still write-only', purged; end if;
+  if exists (select 1 from public.reports where id = v_aged) then
+    raise exception 'FAIL t60: the actioned, aged report survived the purge'; end if;
+  if not exists (select 1 from public.reports where id = v_fresh) then
+    raise exception 'FAIL t60: the purge deleted an actioned report still inside the retention window'; end if;
+  if not exists (select 1 from public.reports where id = v_open) then
+    raise exception 'FAIL t60: the purge deleted an aged report that was never resolved (its subject is still live — that is a triage backlog, not expired retention)'; end if;
+
+  raise notice 'PASS t60: purge_resolved_reports really deletes an actioned report once reviewed_at ages past the window, and spares both an in-window resolved report and an aged unresolved one';
+end $$;
+
+-- t61: a report SURVIVES deletion of the account it is about, minimised.
+--
+-- Deleting the auth user is the real path: the delete-account Edge Function calls
+-- admin.auth.admin.deleteUser (supabase/functions/delete-account/index.ts:69), which cascades
+-- auth.users -> profiles and from there into every referencing table. Before this change
+-- reported_user_id was `not null on delete cascade`, so this delete destroyed the report outright.
+--
+-- The content-report case is asserted separately and is not redundant: posts.author_id and
+-- post_comments.author_id also cascade from profiles, and reports.post_id/comment_id used to cascade
+-- from those, so de-linking reported_user_id alone would still have lost every report about a post
+-- or comment — the retention decision would have applied to account reports only.
+--
+-- The reporter_id asymmetry is asserted too, deliberately: it still cascades (the operator decided
+-- only about reported_user_id), so a report Sion FILED about Teilo is destroyed by Sion's deletion
+-- even though it is about a third party. Pinned here so the asymmetry is visible in a test rather
+-- than only in prose.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000f2';
+do $$ declare v jsonb; v_post uuid; begin
+  select public.create_post('t61: sion post that gets reported', null, null, null) into v;
+  v_post := (v->>'post_id')::uuid;
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000f1', false);
+  perform public.report_post(v_post, 'inappropriate_post_image', 't61: rhian reports sion''s post');
+  -- Sion files a report of his own, about a third party, which his deletion will destroy.
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000f2', false);
+  perform public.report_user('00000000-0000-4000-8000-0000000000f3', 'underage_concern',
+                             't61: sion reports teilo — filed BY the departing user');
+  raise notice 'PASS t61 setup: Sion posts, Rhian reports the post, Sion files a report about Teilo';
+end $$;
+
+reset role;
+do $$
+declare
+  v_key text; v_about_subject int; v_content int; v_filed int; v_post_link uuid;
+  v_details text; v_category public.report_category; v_created timestamptz; v_created_after timestamptz;
+  v_subject uuid;
+begin
+  v_key := public.report_subject_key('00000000-0000-4000-8000-0000000000f2');
+
+  -- Counted by the pseudonymous key alone, NOT by `post_id is null` — the first draft of this
+  -- assertion filtered on that and went red, because a retained CONTENT report has its post link
+  -- cleared and so becomes indistinguishable from an account report. That is the accepted limitation
+  -- recorded at 20260811000400_feed_reports.sql; the test may not quietly assume otherwise.
+  select count(*) into v_about_subject from public.reports where reported_user_key = v_key;
+  if v_about_subject < 3 then
+    raise exception 'FAIL t61: expected >= 3 reports about Sion before deletion (2 account + 1 content), found %', v_about_subject; end if;
+
+  select details, category, created_at into v_details, v_category, v_created
+    from public.reports
+   where reported_user_key = v_key and details = 't56: rhian reports sion';
+
+  select count(*) into v_filed from public.reports
+   where reporter_id = '00000000-0000-4000-8000-0000000000f2';
+  if v_filed < 1 then raise exception 'FAIL t61: Sion filed no reports to test the reporter cascade with'; end if;
+
+  -- The real deletion path.
+  delete from auth.users where id = '00000000-0000-4000-8000-0000000000f2';
+
+  if exists (select 1 from public.profiles where id = '00000000-0000-4000-8000-0000000000f2') then
+    raise exception 'FAIL t61: Sion''s profile survived the auth.users delete'; end if;
+
+  -- 1. Every report about Sion is still there, de-linked, with its content intact.
+  if (select count(*) from public.reports where reported_user_key = v_key)
+       is distinct from v_about_subject then
+    raise exception 'FAIL t61: reports about Sion were destroyed by his deletion (% of % kept)',
+      (select count(*) from public.reports where reported_user_key = v_key), v_about_subject; end if;
+
+  select reported_user_id, details, category, created_at
+    into v_subject, v_details, v_category, v_created_after
+    from public.reports
+   where reported_user_key = v_key and details = 't56: rhian reports sion';
+  if v_subject is not null then
+    raise exception 'FAIL t61: retained report still points at a person (reported_user_id = %)', v_subject; end if;
+  if v_details is distinct from 't56: rhian reports sion' then
+    raise exception 'FAIL t61: retained report lost its details (%)', quote_literal(v_details); end if;
+  if v_category is distinct from 'harassment' then
+    raise exception 'FAIL t61: retained report lost its category (%)', v_category; end if;
+  if v_created_after is distinct from v_created then
+    raise exception 'FAIL t61: retained report''s created_at moved from % to %', v_created, v_created_after; end if;
+
+  -- 2. The key is unchanged by the deletion — it is the whole point of retaining the row.
+  if not exists (select 1 from public.reports where reported_user_key = v_key) then
+    raise exception 'FAIL t61: no row carries the former subject''s pseudonymous key after deletion'; end if;
+
+  -- 3. The CONTENT report survived too, with only the dangling post link cleared.
+  select count(*) into v_content from public.reports
+   where reported_user_key = v_key and details = 't61: rhian reports sion''s post';
+  if v_content <> 1 then
+    raise exception 'FAIL t61: the report about Sion''s post did not survive his deletion (found % rows) — reports.post_id cascades from posts, which cascade from profiles', v_content; end if;
+  select post_id into v_post_link from public.reports
+   where reported_user_key = v_key and details = 't61: rhian reports sion''s post';
+  if v_post_link is not null then
+    raise exception 'FAIL t61: retained content report still points at a deleted post (%)', v_post_link; end if;
+
+  -- 4. The asymmetry the operator has NOT decided on: reports Sion FILED are gone.
+  if exists (select 1 from public.reports where reporter_id = '00000000-0000-4000-8000-0000000000f2') then
+    raise exception 'FAIL t61: reporter_id no longer cascades — that is a separate operator decision, not part of this change'; end if;
+  if exists (select 1 from public.reports where details = 't61: sion reports teilo — filed BY the departing user') then
+    raise exception 'FAIL t61: a report filed by the departing user survived, which reporter_id''s cascade should have removed'; end if;
+
+  raise notice 'PASS t61: deleting the reported account de-links the report and keeps category, details, timestamps and the pseudonymous key — for account AND content reports; reports the departing user FILED still cascade away';
+end $$;
+
+-- t61b: report_not_self still constrains after reported_user_id became nullable, and is stated in
+-- the NULL-safe form.
+--
+-- Two separate assertions because they catch different regressions. The behavioural one catches the
+-- constraint being dropped or loosened while making the column nullable — the reachable failure. The
+-- catalog one pins `is distinct from` specifically, which is NOT behaviourally reachable today:
+-- reporter_id is still `not null`, so `reporter_id <> reported_user_id` can only be NULL on a row
+-- where reported_user_id is NULL, and both forms admit that row. The NULL-safe form matters the
+-- moment reporter_id is given the same `set null` treatment, and pinning it in the catalog is the
+-- only honest way to test a property that has no reachable behaviour yet. See the constraint's own
+-- comment for the extra change that becomes necessary at that point.
+reset role;
+do $$ declare v_state text; v_def text; begin
+  v_state := 'NO ERROR';
+  begin
+    insert into public.reports (reporter_id, reported_user_id, category)
+    values ('00000000-0000-4000-8000-0000000000f1', '00000000-0000-4000-8000-0000000000f1', 'other');
+  exception when others then v_state := sqlstate; end;
+  if v_state is distinct from '23514' then
+    raise exception 'FAIL t61b: a self-report insert gave sqlstate % (want 23514 check_violation)', v_state; end if;
+
+  select pg_get_constraintdef(oid) into v_def from pg_constraint
+   where conrelid = 'public.reports'::regclass and conname = 'report_not_self';
+  if v_def is null then raise exception 'FAIL t61b: report_not_self does not exist'; end if;
+  if v_def !~* 'is distinct from' then
+    raise exception 'FAIL t61b: report_not_self is % — a bare <> evaluates to NULL (satisfied) once either side is nullable', v_def; end if;
+
+  raise notice 'PASS t61b: report_not_self still rejects a self-report with reported_user_id nullable, and is stated NULL-safely';
+end $$;
+
+-- t61c: a retained report with a NULL subject still exports for its reporter (Art. 15).
+--
+-- The pre-existing t51 assertions cannot see this case: export_my_data omits reported_user_id
+-- entirely, so a retained report and an ordinary one look identical in the output, and t51's fixture
+-- subject (Barnaby) is never deleted. Rhian is used because t51 exhausted Alice's data_export rate
+-- limit (5/24h) and Rhian has not called it.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000f1';
+do $$ declare v jsonb; v_retained jsonb; begin
+  select public.export_my_data() into v;
+  if v is null then raise exception 'FAIL t61c: export returned null'; end if;
+
+  select e into v_retained from jsonb_array_elements(v->'reports') e
+   where e->>'details' = 't56: rhian reports sion';
+  if v_retained is null then
+    raise exception 'FAIL t61c: the reporter''s retained report (subject deleted) is missing from their export'; end if;
+  if (v_retained->>'reporter_id') is distinct from '00000000-0000-4000-8000-0000000000f1' then
+    raise exception 'FAIL t61c: retained report exported with reporter_id %', v_retained->>'reporter_id'; end if;
+  if (v_retained->>'category') is distinct from 'harassment' then
+    raise exception 'FAIL t61c: retained report exported with category %', v_retained->>'category'; end if;
+
+  -- The subject's identifiers must not reappear here — neither the (now NULL) id nor the pseudonym,
+  -- which is an identifier FOR THE ACCUSED PARTY and so falls under the same omission.
+  if v_retained ? 'reported_user_id' then
+    raise exception 'FAIL t61c: export exposed reported_user_id on a retained report'; end if;
+  if v_retained ? 'reported_user_key' then
+    raise exception 'FAIL t61c: export exposed reported_user_key — a pseudonym for the accused party'; end if;
+
+  raise notice 'PASS t61c: a retained report whose subject was deleted still exports to its reporter, without the subject''s id or pseudonym';
+end $$;
+
+-- t62: retained reports have a FINITE lifetime. Without this branch a report about a departed
+-- account that nobody ever triaged is kept forever, which would make the retention decision itself
+-- an Art. 5(1)(e) violation rather than a fix. Keyed off created_at because a never-resolved report
+-- has no reviewed_at to key off (report_reviewed_at_matches_status guarantees that).
+--
+-- Three controls, so the branch cannot pass by deleting too much: a retained report still inside its
+-- window survives; an aged report whose subject is still LIVE survives (that is a triage backlog, a
+-- separate operator decision); and an aged-by-created_at retained report that WAS resolved recently
+-- survives, because a resolved report is governed by the reviewed_at clock instead.
+reset role;
+do $$
+declare
+  v_old uuid; v_new uuid; v_live uuid; v_resolved uuid; v_key text; purged int;
+begin
+  v_key := public.report_subject_key('00000000-0000-4000-8000-0000000000f2');
+
+  select id into v_old from public.reports
+   where reported_user_key = v_key and details = 't56: rhian reports sion';
+  select id into v_new from public.reports
+   where reported_user_key = v_key and details = 't56: una reports sion';
+  select id into v_resolved from public.reports
+   where reported_user_key = v_key and details = 't61: rhian reports sion''s post';
+  select id into v_live from public.reports
+   where reported_user_id = '00000000-0000-4000-8000-0000000000f3'
+     and details = 't60: aged but never resolved';
+  if v_old is null or v_new is null or v_resolved is null or v_live is null then
+    raise exception 'FAIL t62: fixtures missing (old %, new %, resolved %, live %)', v_old, v_new, v_resolved, v_live; end if;
+
+  -- Age two retained rows past 24 months; leave the third retained row recent.
+  update public.reports set created_at = now() - interval '25 months' where id in (v_old, v_resolved);
+  perform public.review_report(v_resolved, 'dismissed');   -- recent reviewed_at, ancient created_at
+
+  select public.purge_resolved_reports(interval '18 months', interval '24 months') into purged;
+  if purged < 1 then
+    raise exception 'FAIL t62: the retained-report branch purged % rows (want >= 1)', purged; end if;
+  if exists (select 1 from public.reports where id = v_old) then
+    raise exception 'FAIL t62: a retained report 25 months old and never reviewed was kept indefinitely'; end if;
+  if not exists (select 1 from public.reports where id = v_new) then
+    raise exception 'FAIL t62: the purge deleted a retained report still inside its 24-month window'; end if;
+  if not exists (select 1 from public.reports where id = v_live) then
+    raise exception 'FAIL t62: the purge deleted an aged unresolved report whose subject is still live'; end if;
+  if not exists (select 1 from public.reports where id = v_resolved) then
+    raise exception 'FAIL t62: the purge deleted a retained report that was resolved recently — a resolved report is governed by the reviewed_at clock, not created_at'; end if;
+
+  raise notice 'PASS t62: retained reports never reviewed are purged 24 months after created_at, while in-window, live-subject and recently-resolved rows are spared';
+end $$;
+
+-- t63: the whole account-deletion sequence still completes for a user who is on BOTH sides of the
+-- moderation queue.
+--
+-- This is the specific hazard of turning a cascade into `set null`: a FK that no longer cascades can
+-- BLOCK a delete if anything downstream relied on the cascade to clear the referencing rows. The
+-- delete-account Edge Function runs two steps against the database, in this order
+-- (supabase/functions/delete-account/index.ts:37,69):
+--
+--   1. `public.delete_account()` AS the user — anonymise + tear down friendships, blocks, tokens,
+--      sessions, diary. It never touches public.reports, so reports still reference the departing
+--      user when it returns. Nothing in this suite exercised this RPC at all before now.
+--   2. `auth.admin.deleteUser` — deletes auth.users, cascading to profiles and from there into
+--      reports via BOTH of its FKs at once: reporter_id (cascade, deletes the row) and
+--      reported_user_id (set null, keeps it).
+--
+-- Una is used because she is on both sides: she filed reports in t56/t60 and Rhian reports her here.
+-- The two FK actions therefore fire against her in the same statement, which is the case most likely
+-- to deadlock, conflict, or trip a constraint if the change is wrong.
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000f1';
+do $$ begin
+  perform public.report_user('00000000-0000-4000-8000-0000000000f4', 'inappropriate_text',
+                             't63: rhian reports una, who is also a reporter');
+  raise notice 'PASS t63 setup: Una is now both a reporter and a reported user';
+end $$;
+
+reset role; set role authenticated; set app.uid = '00000000-0000-4000-8000-0000000000f4';
+do $$
+declare v_filed int; v_about int; v_key text; v_subject uuid; begin
+  v_key := public.report_subject_key('00000000-0000-4000-8000-0000000000f4');
+
+  reset role;
+  select count(*) into v_filed from public.reports
+   where reporter_id = '00000000-0000-4000-8000-0000000000f4';
+  select count(*) into v_about from public.reports where reported_user_key = v_key;
+  if v_filed < 1 or v_about < 1 then
+    raise exception 'FAIL t63: Una must be on both sides (filed %, about %)', v_filed, v_about; end if;
+
+  -- Step 1, as the user. Must not raise: a report referencing her is not her data to tear down.
+  set role authenticated;
+  perform set_config('app.uid', '00000000-0000-4000-8000-0000000000f4', false);
+  perform public.delete_account();
+  reset role;
+
+  if (select deleted_at from public.profiles where id = '00000000-0000-4000-8000-0000000000f4') is null then
+    raise exception 'FAIL t63: delete_account did not mark the profile deleted'; end if;
+  -- ...and it left the moderation queue alone, as it always did.
+  if (select count(*) from public.reports where reported_user_key = v_key) is distinct from v_about then
+    raise exception 'FAIL t63: delete_account changed the reports about the caller'; end if;
+
+  -- Step 2: the auth-user deletion, where both FK actions fire against her at once.
+  delete from auth.users where id = '00000000-0000-4000-8000-0000000000f4';
+
+  if exists (select 1 from public.profiles where id = '00000000-0000-4000-8000-0000000000f4') then
+    raise exception 'FAIL t63: the profile survived the auth.users delete'; end if;
+  if exists (select 1 from public.reports where reporter_id = '00000000-0000-4000-8000-0000000000f4') then
+    raise exception 'FAIL t63: reports Una filed survived (reporter_id must still cascade)'; end if;
+  if (select count(*) from public.reports where reported_user_key = v_key) is distinct from v_about then
+    raise exception 'FAIL t63: reports about Una were destroyed (% of % kept)',
+      (select count(*) from public.reports where reported_user_key = v_key), v_about; end if;
+  select reported_user_id into v_subject from public.reports where reported_user_key = v_key limit 1;
+  if v_subject is not null then
+    raise exception 'FAIL t63: a retained report about Una still points at her (%)', v_subject; end if;
+
+  raise notice 'PASS t63: delete_account() then the auth.users delete both succeed for a user on both sides of the queue — her filed reports cascade away, reports about her are retained and de-linked';
+end $$;
+
 reset role;
 \echo '-------------------------------------------'
 \echo 'ALL RLS/RPC CHECKS PASSED'

@@ -92,7 +92,40 @@ begin
 end;
 $$;
 
-create or replace function public.purge_resolved_reports(p_older_than interval default interval '18 months')
+-- Report retention. Two classes of report, two clocks, one scheduled job — deliberately one
+-- function so there is a single place to reason about how long a moderation record lives, and a
+-- single cron entry to get wrong. The name is now marginally narrower than the behaviour (it also
+-- removes retained-but-never-resolved rows); it is kept because docs/RELEASE_CHECKLIST.md,
+-- docs/DPIA.md and docs/RECORDS_OF_PROCESSING.md all cite it by name.
+--
+-- 1. RESOLVED reports: p_older_than after `reviewed_at`. Unchanged in intent, but reachable for the
+--    first time — until public.review_report existed (20260813000100_review_report.sql) nothing in
+--    the entire schema ever set `status` or `reviewed_at`, so this branch matched zero rows for its
+--    whole life and the 18-month commitment in docs/legal/DATA_RETENTION_POLICY.md could not be
+--    honoured. The suite now asserts that it actually deletes a row.
+--
+-- 2. RETAINED reports whose subject is gone and which were never resolved: p_retained_older_than
+--    after `created_at`. These have no `reviewed_at` to key off (see the
+--    report_reviewed_at_matches_status constraint), so without this branch a report about a departed
+--    account that nobody ever triaged would be kept forever — indefinite retention, which is what
+--    Art. 5(1)(e) forbids and which would make the retention decision itself indefensible.
+--
+--    24 months from `created_at` is chosen so the two classes land in roughly the same place: a
+--    report resolved ~6 months after filing and then kept 18 months from resolution is destroyed
+--    about 24 months after filing, so both classes stay inside the 12–24 month window published in
+--    docs/legal/DATA_RETENTION_POLICY.md and there is one outward-facing figure rather than two.
+--    THE NUMBER IS AN ENGINEERING DEFAULT CHOSEN FOR CONSISTENCY, NOT LEGAL ADVICE, and requires
+--    counsel sign-off before launch — the relevant limitation periods for the claims this retention
+--    is meant to defend are a lawyer's question, not a schema author's.
+--
+-- Not covered, on purpose: reports about a LIVE account that were never resolved. They remain
+-- unbounded (docs/DPIA.md §3.8 already records this). Bounding them is a separate operator
+-- decision, because the fix for a never-triaged report about a live account is to triage it, and a
+-- purge would quietly destroy an open safety report rather than surface it.
+create or replace function public.purge_resolved_reports(
+  p_older_than interval default interval '18 months',
+  p_retained_older_than interval default interval '24 months'
+)
 returns int
 language plpgsql
 security definer
@@ -103,8 +136,17 @@ declare
 begin
   with gone as (
     delete from public.reports
-     where status in ('actioned', 'dismissed')
-       and reviewed_at < now() - p_older_than
+     where (
+             -- 1. resolved: clock runs from the review outcome
+             status in ('actioned', 'dismissed')
+             and reviewed_at < now() - p_older_than
+           )
+        or (
+             -- 2. retained + never resolved: clock runs from when the report was filed
+             reported_user_id is null
+             and reviewed_at is null
+             and created_at < now() - p_retained_older_than
+           )
     returning 1
   )
   select count(*)::int into v_count from gone;
@@ -113,10 +155,16 @@ begin
 end;
 $$;
 
+comment on function public.purge_resolved_reports(interval, interval) is
+  'Retention purge for public.reports: resolved reports p_older_than after reviewed_at, plus '
+  'reports whose subject account was deleted and which were never resolved, p_retained_older_than '
+  'after created_at. Service role only. Both periods require counsel sign-off '
+  '(docs/legal/DATA_RETENTION_POLICY.md).';
+
 -- Maintenance surface: service role only, matching prune_rate_limit_events
 -- (20260101000600_security_helpers.sql:140). No client, including `authenticated`, may run a
 -- retention purge directly.
 revoke all on function public.purge_soft_deleted_posts(interval) from public, anon, authenticated;
 revoke all on function public.purge_soft_deleted_comments(interval) from public, anon, authenticated;
 revoke all on function public.purge_soft_deleted_pint_entries(interval) from public, anon, authenticated;
-revoke all on function public.purge_resolved_reports(interval) from public, anon, authenticated;
+revoke all on function public.purge_resolved_reports(interval, interval) from public, anon, authenticated;
