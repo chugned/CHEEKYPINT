@@ -40,12 +40,24 @@ struct FriendsRepository: Sendable {
     }
 
     func report(_ userID: UUID, category: ReportCategory, details: String?) async throws {
+        #if DEBUG
+        try DebugFaultInjector.throwIfFaulted(DebugFaultInjector.Operation.reportUser)
+        #endif
         if await DemoWorld.shared.isActive { return }
         try await data.rpcVoid(
             "report_user", params: ReportParams(pTarget: userID, pCategory: category.rawValue, pDetails: details))
     }
 
     func fetchFriends() async throws -> [FriendDTO] {
+        #if DEBUG
+        // See `DebugFaultInjector`'s doc. Forced-empty is what lets a UI test reach
+        // `PostCommentsSheet`'s mention autocomplete with zero friends loaded — there's no seed
+        // variant of `DemoWorld.friends()` with none, and `PostCommentsViewModel.load()` already
+        // swallows a genuine failure here to `[]`, so failing this operation would produce the
+        // same visible state anyway; forcing empty says directly what's being tested.
+        try DebugFaultInjector.throwIfFaulted(DebugFaultInjector.Operation.fetchFriends)
+        if DebugFaultInjector.isForcedEmpty(DebugFaultInjector.Operation.fetchFriends) { return [] }
+        #endif
         if await DemoWorld.shared.isActive { return await DemoWorld.shared.friends() }
         return try await data.rpc("get_friends", params: EmptyBody())
     }
