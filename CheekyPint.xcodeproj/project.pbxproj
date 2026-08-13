@@ -54,6 +54,7 @@
 		67D2581D727E7635247B3753 /* AddFriendView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC1D204FB60B2CB58469EAF2 /* AddFriendView.swift */; };
 		688B46723CE439F5EEE38758 /* PlacePickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0BA5446A6E4A869C6306A94 /* PlacePickerTests.swift */; };
 		68AFEB7D15AF98C3C416924B /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D693B5BFB92FFAF57CB2BC50 /* AuthView.swift */; };
+		6A117C8FDBDAD64792E6AE20 /* AccessibilityAnnouncer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72C191C73D0FEA8D4C0FC3A2 /* AccessibilityAnnouncer.swift */; };
 		6D0C5AC73FAC829A86F78F05 /* RelativeTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBA9176D42E66AD673CB1665 /* RelativeTime.swift */; };
 		6F396835EAD4790FBC086BBA /* demo-pint.png in Resources */ = {isa = PBXBuildFile; fileRef = 92F0B2D8EC8B2BE4982FB23A /* demo-pint.png */; };
 		736923CBCA7304F839E05CFC /* HomeComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C159334B37CFC7DAA096E37 /* HomeComponents.swift */; };
@@ -67,6 +68,7 @@
 		8A273AD4FA7450ADF8F8DAAD /* ProfileRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A04B8A45B27EB5E594B5172 /* ProfileRepository.swift */; };
 		8B587A71D2A1C8BD5B106DED /* BlockedUsersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28E880C268F01EA897CD5EFD /* BlockedUsersView.swift */; };
 		8DAE93C1692BBD1C101E1255 /* ReportContentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EE6AEA2F988D4081AD90FA9 /* ReportContentTests.swift */; };
+		902578D94A03BCBBF9D0A892 /* AccessibilityAnnouncerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C2C1D4B2D469AED28873614 /* AccessibilityAnnouncerTests.swift */; };
 		9093D3D6992A8521E0468EDE /* PubsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = A493EAA559F914C8DE9005DA /* PubsRepository.swift */; };
 		93223E29BE3078F11048419F /* RPCContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF84E8BCF22797D2F92B1FCD /* RPCContracts.swift */; };
 		93DA601A08AFD9F06E357FE5 /* DeleteAccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 992A7152E72932A1AD45B8E7 /* DeleteAccountView.swift */; };
@@ -172,6 +174,7 @@
 		6ECE41FEB04B0962570C1EC0 /* LogPintSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogPintSheet.swift; sourceTree = "<group>"; };
 		6FA31333111DB6B77346249F /* FeedRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedRepository.swift; sourceTree = "<group>"; };
 		7273023994D1632D9EE2E815 /* SupabaseAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseAuth.swift; sourceTree = "<group>"; };
+		72C191C73D0FEA8D4C0FC3A2 /* AccessibilityAnnouncer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityAnnouncer.swift; sourceTree = "<group>"; };
 		730EF203CA9747BBEC5A88DA /* CheekyPintApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheekyPintApp.swift; sourceTree = "<group>"; };
 		7DC941C300523CECA2080CDC /* QRCodeGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeGenerator.swift; sourceTree = "<group>"; };
 		7E9956064AA1C857C4FBDA79 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
@@ -191,6 +194,7 @@
 		9AA85C3CBCA4166E5CCFB23B /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		9B72B647981FEDEA8D2B14AD /* FeedUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedUITests.swift; sourceTree = "<group>"; };
 		9B8159546E6EE1303F51FF3E /* FeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedView.swift; sourceTree = "<group>"; };
+		9C2C1D4B2D469AED28873614 /* AccessibilityAnnouncerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityAnnouncerTests.swift; sourceTree = "<group>"; };
 		9D36B61D465CF9EFB0F4763B /* LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationService.swift; sourceTree = "<group>"; };
 		9FE2EBAF2631120634D10BD9 /* LegalDocumentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalDocumentView.swift; sourceTree = "<group>"; };
 		A124A384059294BDE16FB0A4 /* MyQRView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyQRView.swift; sourceTree = "<group>"; };
@@ -544,6 +548,7 @@
 		C9D9019B3923691D61CD1990 /* CheekyPintTests */ = {
 			isa = PBXGroup;
 			children = (
+				9C2C1D4B2D469AED28873614 /* AccessibilityAnnouncerTests.swift */,
 				0B485E248E225AAA60C16019 /* AppSmokeTests.swift */,
 				0A25E072993F0DF9B435AF74 /* BeerCatalogTests.swift */,
 				A7D8490799C266AA018C6621 /* ComposePostTests.swift */,
@@ -623,6 +628,7 @@
 		FC954C6F19C1579205B1F9BE /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				72C191C73D0FEA8D4C0FC3A2 /* AccessibilityAnnouncer.swift */,
 				0BCE684699EBDBA2C1DD73C7 /* Array+Deduplicated.swift */,
 				4E1EBF06157D81B3B210A5EF /* CryptoNonce.swift */,
 				AE19D454DDC06A49CAC8D711 /* Haptics.swift */,
@@ -752,6 +758,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				902578D94A03BCBBF9D0A892 /* AccessibilityAnnouncerTests.swift in Sources */,
 				F4EDDCADA7B3D1DAE9F8FB5E /* AppSmokeTests.swift in Sources */,
 				2EBA417F30678B235EC70817 /* BeerCatalogTests.swift in Sources */,
 				22A96A4B3D521BAE182953C5 /* ComposePostTests.swift in Sources */,
@@ -776,6 +783,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6A117C8FDBDAD64792E6AE20 /* AccessibilityAnnouncer.swift in Sources */,
 				67D2581D727E7635247B3753 /* AddFriendView.swift in Sources */,
 				9D264DA547507A32E22B56DD /* AnalyticsService.swift in Sources */,
 				50957A9DEF3F9845847D0D82 /* AppConfig.swift in Sources */,

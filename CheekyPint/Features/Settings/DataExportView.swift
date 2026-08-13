@@ -27,6 +27,9 @@ struct DataExportView: View {
     @State private var isExporting = false
     @State private var errorMessage: String?
     @State private var result: ExportResult?
+    /// See `AccessibilityAnnouncer`'s doc — speaks `errorMessage` and the truncation warning for
+    /// VoiceOver, deduped so identical text (e.g. two exports in a row both truncated) doesn't nag.
+    @State private var announcer = AccessibilityAnnouncer()
 
     struct ExportResult: Equatable {
         let fileURL: URL
@@ -68,10 +71,16 @@ struct DataExportView: View {
                 .font(Theme.Typography.body)
                 .foregroundStyle(Theme.Palette.textSecondary)
 
+                // Both: see `PostCommentsSheet.swift`'s comment on `comments-send-error` — that
+                // sibling was found ellipsis-truncated at accessibility XXL under a height
+                // squeeze the code review alone hadn't caught. Applied here too, defensively;
+                // this `ScrollView`'s own `VStack` is less likely to squeeze either of these, but
+                // the fix costs nothing when it isn't needed.
                 if let result, let warning = Self.warningMessage(for: result.truncationStatus) {
                     Label(warning, systemImage: "exclamationmark.triangle.fill")
                         .font(Theme.Typography.callout)
                         .foregroundStyle(Theme.Palette.warning)
+                        .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("data-export-warning")
                 }
 
@@ -79,6 +88,7 @@ struct DataExportView: View {
                     Text(errorMessage)
                         .font(Theme.Typography.callout)
                         .foregroundStyle(Theme.Palette.warning)
+                        .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("data-export-error")
                 }
 
@@ -111,6 +121,14 @@ struct DataExportView: View {
         // person is done with this screen" — see the type doc for why this, not a ShareLink
         // completion, is what bounds the file's lifetime on the "leaving" side.
         .onDisappear { Self.clearExportDirectory() }
+        // See `AccessibilityAnnouncer`'s doc. Two sources, one announcer, same reasoning as
+        // `ReportContentView`: the error text and the truncation warning are never the same
+        // string, so sharing one "last spoken" memory can't cross-suppress them.
+        .onChange(of: errorMessage) { _, new in announcer.announce(new) }
+        .onChange(of: result) { _, new in
+            guard let new else { return }
+            announcer.announce(Self.warningMessage(for: new.truncationStatus))
+        }
     }
 
     private func export() async {

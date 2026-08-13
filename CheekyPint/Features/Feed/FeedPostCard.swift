@@ -149,7 +149,16 @@ struct FeedPostCard: View {
                     case .loading:
                         ProgressView().tint(Theme.Palette.accent)
                     case .success(let image):
+                        // The photo is the *content* of a photo post, not decoration — hiding it
+                        // would tell a blind user nothing about what they're cheering. Nothing in
+                        // the data model carries alt text to describe it honestly, so this names
+                        // it as the author's photo rather than fabricating a description or
+                        // staying silent. Contrast with the composer's own thumbnail preview
+                        // (`ComposePostSheet.swift`), which correctly stays `.accessibilityHidden`
+                        // — there, the user just picked the image themselves, so a label would be
+                        // telling them something they already know.
                         image.resizable().scaledToFill()
+                            .accessibilityLabel("Photo posted by \(post.post.displayName)")
                     case .failure:
                         photoUnavailablePlaceholder
                     }

@@ -66,6 +66,9 @@ struct ComposePostSheet: View {
     @State private var photoJPEG: Data?
     @State private var isPosting = false
     @State private var errorMessage: String?
+    /// See `AccessibilityAnnouncer`'s doc — speaks `errorMessage` for VoiceOver, deduped so a
+    /// retry that hits the identical error doesn't nag.
+    @State private var announcer = AccessibilityAnnouncer()
     @State private var selectedPlace: SelectedPlace?
     @State private var showingPlacePicker = false
 
@@ -84,6 +87,14 @@ struct ComposePostSheet: View {
                     Text(errorMessage)
                         .font(Theme.Typography.callout)
                         .foregroundStyle(Theme.Palette.warning)
+                        // See `PostCommentsSheet.swift`'s matching comment on
+                        // `comments-send-error` — screenshotting that sibling at accessibility
+                        // XXL with the keyboard up found it silently ellipsis-truncated because
+                        // its parent proposed less height than its full wrapped text needed. This
+                        // `Form` row is less likely to be squeezed the same way, but the fix is
+                        // free when it isn't needed, so it's applied to all five inline
+                        // error/success texts for the same reason.
+                        .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("compose-post-error")
                 }
                 bodySection
@@ -110,6 +121,9 @@ struct ComposePostSheet: View {
             .overlay { if isPosting { ProgressView().tint(Theme.Palette.accent) } }
         }
         .presentationDetents([.large])
+        // See `AccessibilityAnnouncer`'s doc — announces `errorMessage` for VoiceOver on genuine
+        // change only.
+        .onChange(of: errorMessage) { _, new in announcer.announce(new) }
     }
 
     // MARK: - Sections

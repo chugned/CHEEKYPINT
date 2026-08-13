@@ -63,6 +63,9 @@ struct PostCommentsSheet: View {
     /// `PostCommentDTO` is already `Identifiable`, so this doubles as both "is a report sheet
     /// showing" and "which comment it's for" with no extra Bool to keep in sync.
     @State private var reportingComment: PostCommentDTO?
+    /// See `AccessibilityAnnouncer`'s doc — speaks `model?.sendError` for VoiceOver, deduped so a
+    /// retry that hits the identical error doesn't nag.
+    @State private var announcer = AccessibilityAnnouncer()
 
     var body: some View {
         NavigationStack {
@@ -77,6 +80,17 @@ struct PostCommentsSheet: View {
                     Text(sendError)
                         .font(Theme.Typography.callout)
                         .foregroundStyle(Theme.Palette.warning)
+                        // Found by screenshot at accessibility XXL with the keyboard up, not by
+                        // code review: `commentsList` below is a flexible sibling in this
+                        // `VStack`, and with the keyboard eating half the screen there wasn't
+                        // enough height left to propose this `Text` its full 3-line ideal — it
+                        // rendered "You're offline. We'll try again when yo…", silently losing
+                        // the rest of the sentence with no visual sign anything was cut. Locking
+                        // this view to its own ideal height, regardless of what the parent
+                        // proposes, is what actually fixes it (a `Text` with no explicit
+                        // `.lineLimit` still truncates with an ellipsis once its *proposed*
+                        // height is smaller than what full wrapping needs).
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, Theme.Spacing.md)
                         .padding(.top, Theme.Spacing.sm)
                         .accessibilityIdentifier("comments-send-error")
@@ -104,6 +118,9 @@ struct PostCommentsSheet: View {
             ReportContentView(target: .comment(id: comment.id))
         }
         .presentationDetents([.large])
+        // See `AccessibilityAnnouncer`'s doc — announces the send/delete error for VoiceOver on
+        // genuine change only.
+        .onChange(of: model?.sendError) { _, new in announcer.announce(new) }
         .task {
             guard model == nil else { return }
             let vm = PostCommentsViewModel(postID: postID, container: container,
@@ -154,7 +171,11 @@ struct PostCommentsSheet: View {
         HStack(alignment: .top, spacing: Theme.Spacing.sm) {
             RemoteAvatar(url: container.avatarURL(for: comment.avatarPath), name: comment.displayName, size: 32)
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                HStack(spacing: Theme.Spacing.xs) {
+                // Stacked vertically, matching `FeedPostCard.header`'s identical name+time pair —
+                // not a bespoke fix. Side-by-side in an `HStack` at accessibility XXL, "Barnaby"
+                // had too little width left next to "20 min ago" and hyphenated mid-word into
+                // "Barn-"/"aby" across two lines; stacking gives each its own full-width line.
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                     Text(comment.displayName)
                         .font(Theme.Typography.headline)
                         .foregroundStyle(Theme.Palette.textPrimary)

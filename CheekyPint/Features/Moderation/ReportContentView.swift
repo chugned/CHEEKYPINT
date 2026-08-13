@@ -82,6 +82,9 @@ struct ReportContentView: View {
     @State private var isSending = false
     @State private var sent = false
     @State private var errorMessage: String?
+    /// See `AccessibilityAnnouncer`'s doc — speaks `errorMessage`/the sent confirmation for
+    /// VoiceOver, deduped so a retry that hits the identical error doesn't nag.
+    @State private var announcer = AccessibilityAnnouncer()
 
     init(target: ReportTarget) {
         self.target = target
@@ -123,12 +126,48 @@ struct ReportContentView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // At the top of the Form, matching `ComposePostSheet`'s own status-text
+                // placement — not at the bottom, where they sat before. Screenshotting this
+                // screen at accessibility XXL found the bottom placement meant the "sent"
+                // confirmation rendered entirely below the fold: the Reason and Details sections
+                // alone already exceed one screen's height at that text size, and `send()`
+                // dismisses the sheet only ~1s after `sent` flips true — nowhere near enough time
+                // for a sighted user to scroll down and actually see it. Top placement means it's
+                // visible immediately, with no scrolling, regardless of text size.
+                if sent {
+                    // See `PostCommentsSheet.swift`'s comment on `comments-send-error` — that
+                    // sibling was found ellipsis-truncated at accessibility XXL under a height
+                    // squeeze the code review alone hadn't caught. Applied here too, defensively.
+                    Label("Thanks — our team will take a look.", systemImage: "checkmark.circle.fill")
+                        .font(Theme.Typography.callout)
+                        .foregroundStyle(Theme.Palette.success)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("report-content-sent")
+                }
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(Theme.Typography.callout)
+                        .foregroundStyle(Theme.Palette.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("report-content-error")
+                }
                 Section("Reason") {
+                    // `.navigationLink`, not the Form default (an inline menu-style row: the
+                    // selected value squeezed next to a chevron on the same line as "Reason").
+                    // At accessibility XXL the longest categories ("Inappropriate profile image")
+                    // middle-truncated to illegible fragments like "Inappr…te text" in that
+                    // cramped space. `.navigationLink` pushes to a dedicated screen where each
+                    // option is its own full-width row — free to wrap onto a second line instead
+                    // of truncating — and the summary row's own selected-value text gets the same
+                    // benefit, since it no longer shares a line with the section header text.
+                    // Confirmed by screenshot at XXL, not just style choice — see
+                    // `docs/ACCESSIBILITY_AUDIT.md`.
                     Picker("Reason", selection: $category) {
                         ForEach(ReportCategory.allCases, id: \.self) { option in
                             Text(option.displayName).font(Theme.Typography.body).tag(option)
                         }
                     }
+                    .pickerStyle(.navigationLink)
                     .accessibilityIdentifier("report-content-reason")
                     .accessibilityLabel("Reason")
                 }
@@ -153,18 +192,6 @@ struct ReportContentView: View {
                             .accessibilityLabel("\(detailsLength) of \(Self.detailsLimit) characters used")
                     }
                 }
-                if sent {
-                    Label("Thanks — our team will take a look.", systemImage: "checkmark.circle.fill")
-                        .font(Theme.Typography.callout)
-                        .foregroundStyle(Theme.Palette.success)
-                        .accessibilityIdentifier("report-content-sent")
-                }
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(Theme.Typography.callout)
-                        .foregroundStyle(Theme.Palette.warning)
-                        .accessibilityIdentifier("report-content-error")
-                }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.Palette.backgroundPrimary)
@@ -183,6 +210,14 @@ struct ReportContentView: View {
                         .accessibilityLabel("Send report")
                 }
             }
+        }
+        // See `AccessibilityAnnouncer`'s doc. Two sources, one announcer: the two texts are never
+        // the same string, and both dedup against the same "last spoken" memory correctly either
+        // way.
+        .onChange(of: errorMessage) { _, new in announcer.announce(new) }
+        .onChange(of: sent) { _, new in
+            guard new else { return }
+            announcer.announce("Thanks — our team will take a look.")
         }
     }
 

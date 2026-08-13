@@ -45,6 +45,18 @@ struct FeedRepository: Sendable {
 
     @discardableResult
     func addComment(postID: UUID, body: String, mentions: [UUID]) async throws -> UUID {
+        #if DEBUG
+        // Deterministic entry for UI-test screenshots of `comments-send-error` — mirrors
+        // `-uiTestDemo`'s pattern (`SessionController.bootstrap`). Demo mode's own repository
+        // calls never throw (see the doc a few lines below), so there was previously no way to
+        // reach any of the app's five inline error/success states from a scripted UI test at all;
+        // this is the one write call flagged as "easiest to force offline" in the accessibility
+        // audit. Compiled out of Release entirely, like every other `#if DEBUG` launch-argument
+        // gate in this app.
+        if ProcessInfo.processInfo.arguments.contains("-uiTestForceOffline") {
+            throw SupabaseError.offline
+        }
+        #endif
         if await DemoWorld.shared.isActive {
             return await DemoWorld.shared.addComment(postID: postID, body: body, mentions: mentions)
         }
