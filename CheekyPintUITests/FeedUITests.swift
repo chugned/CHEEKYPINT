@@ -75,4 +75,33 @@ final class FeedUITests: XCTestCase {
                        "the inline message must carry the friendly, honest offline copy FeedViewModel set on cheersError")
         XCTAssertTrue(cheers.isEnabled, "the row must stay usable while the error is shown")
     }
+
+    /// Pre-existing defect logged in `docs/STATE_AUDIT.md`'s Cheers section: tapping
+    /// `cheers-toggle` can spuriously flip that same post's `showingComments` to `true`,
+    /// opening `PostCommentsSheet` on top of the feed even though the comments button was never
+    /// touched. Confirmed not self-correcting (it doesn't un-present on its own after several
+    /// seconds with no alert in the picture), and confirmed to reproduce identically against the
+    /// original `.alert`-based code, before the alert's own ~0.5s presentation delay had a chance
+    /// to force-dismiss the wrongly-opened sheet.
+    ///
+    /// Uses the same fault-injected `toggleCheers` failure the alert investigation used — that's
+    /// what makes this reliably reproducible rather than probabilistic: it forces
+    /// `FeedViewModel.toggleCheers`'s state mutation to land on the very next run loop turn after
+    /// the tap. No `sleep`/`Task.sleep` appears here or in the app: `tap()` already synchronizes
+    /// with the app's run loop before returning to this test, so the defect, when present, is
+    /// already observable the instant `tap()` returns — nothing here waits for it.
+    @MainActor
+    func testFeedCheersToggleDoesNotOpenCommentsSheet() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestDemo", "-uiTestFailOperation", "toggleCheers", "-uiTestFailError", "offline"]
+        app.launch()
+        app.tabBars.buttons["Feed"].tap()
+
+        let cheers = app.buttons.matching(identifier: "cheers-toggle").firstMatch
+        XCTAssertTrue(cheers.waitForExistence(timeout: 10), "each post needs a Cheers control")
+        cheers.tap()
+
+        XCTAssertFalse(app.navigationBars["Comments"].exists,
+                        "tapping Cheers must not spuriously open that post's comments sheet")
+    }
 }

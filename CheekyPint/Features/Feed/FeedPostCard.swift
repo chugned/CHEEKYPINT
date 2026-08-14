@@ -198,8 +198,17 @@ struct FeedPostCard: View {
     }
 
     private var footer: some View {
+        // `.buttonStyle(.plain)` on each control below, matching the identical two-plain-Buttons-
+        // in-one-HStack-in-a-List-row shape `FriendsView.pendingRow` already guards this way. With
+        // no button style set at all, SwiftUI/UIKit's List row hit-testing can route a tap
+        // anywhere in this HStack to the wrong sibling Button — confirmed the deterministic cause
+        // of `docs/STATE_AUDIT.md`'s "tapping Cheers spuriously opens comments" defect, not a
+        // timing race: `.plain` makes each control its own independently hit-tested target, no
+        // wall-clock element involved. `.plain` also has no visual effect here (no chrome to
+        // remove), so neither button's appearance changes.
         HStack {
             CheersButton(cheered: post.viewerHasCheered, count: post.cheersCount, action: onToggleCheers)
+                .buttonStyle(.plain)
             Spacer(minLength: 0)
             Button {
                 showingComments = true
@@ -208,6 +217,7 @@ struct FeedPostCard: View {
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Palette.textSecondary)
             }
+            .buttonStyle(.plain)
             .frame(minHeight: Theme.minTapTarget)
             .contentShape(Rectangle())
             .accessibilityIdentifier("post-comments-button")

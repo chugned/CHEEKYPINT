@@ -11,6 +11,17 @@ tests / 77 CheekyPintCore / 65 corecheck / 114 SQL / 5-of-5 UI tests, zero failu
 applied (follow-up pass)" for what changed, the real root cause of the Cheers alert (not the
 two-`.alert` hypothesis that motivated the fix pass), and final test counts.
 
+**Update (tap-routing pass, base HEAD `b7f4e85`): the "Cheers can spuriously open Comments" defect
+logged at the end of "Fixes applied" §1 below is now fixed too, and fixing it required correcting
+§1's own root-cause finding.** The "whether the tap passes through a native
+`Menu`/`confirmationDialog` transition first" conclusion in §1 was a real, reproducible
+correlation but not the actual mechanism — it was never re-tested against button style, because at
+the time nobody suspected `FeedPostCard.footer`'s two plain, unstyled `Button`s of anything beyond
+being the tap targets. They were the actual cause of both symptoms. See the corrected §1 write-up
+below and the new §4 for the fix, the elimination evidence, and the controlled experiment that
+proves the correction (reverting to the original live-read `.alert` shape, on top of the button-
+style fix alone, makes it present reliably — see §4).
+
 **Screens:** `FeedView`/`FeedPostCard`, `ComposePostSheet`, `PlacePickerSheet`,
 `PostCommentsSheet`, `ReportContentView`, `DataExportView`.
 
@@ -94,6 +105,7 @@ broken."
 | `loadMore` reaches the natural end | `FeedView.swift:128-148` (no branch fires once `loadError == nil && !hasMore`); `/tmp/state-feed-loadmore-end.png` | ...simply nothing: the list ends after post #20, straight into the tab bar, no footer at all. This *is* distinguishable from the error case (Retry pill present vs. absent) — answers the specific question below — but there is no positive "you've reached the end" affirmation either; the absence of a footer is the only signal. | Low — distinguishable (the requirement), but a silent stop is a minor UX gap on its own. |
 | Delete-post error | `FeedView.swift:114-121`; `/tmp/state-feed-delete-error.png` | `.alert("Couldn't delete that post", …)` **does** present (unlike Cheers below, before the fix), with "Something went wrong. Please try again." and an OK button. Confirmed dismissible: tapping OK clears it and the row's "Post options" menu is still usable immediately after — not stuck. | None — pass |
 | Cheers-toggle error | `FeedViewModel.swift:264-285`, `FeedView.swift`; `/tmp/state-feed-cheers-error-silent-failure.png`, `/tmp/state-feed-cheers-error-rollback-uncheered.png` (before), `/tmp/state-feed-cheers-inline-error-fixed.png` (after) | See "The Cheers finding" above for the state-is-never-wrong evidence (unchanged). **Fixed** — see "Fixes applied" below for the real root cause, why the two-`.alert` hypothesis was wrong, and why the shipped remedy is inline text rather than a timed alert. Re-screenshotted with `-uiTestFailOperation toggleCheers -uiTestFailError offline`: "You're offline. We'll try again when you're back." renders as an inline banner above Barnaby's card, with the row staying usable underneath it. Regression test: `FeedUITests.testFeedCheersErrorShowsInlineMessage`. | **High — Fixed** |
+| Cheers-toggle spuriously opens Comments | `FeedPostCard.swift:200-224` (`footer`) | **Fixed — see "Fixes applied" §4.** Tapping `cheers-toggle` could flip that same post's `showingComments` to `true`, opening `PostCommentsSheet` on top of the feed. Root cause: `footer`'s `CheersButton` and comments `Button` shared one `HStack` in a `List` row with no `buttonStyle` set on either — the one place in this codebase that broke the `.buttonStyle(.plain)`-per-button convention `FriendsView.pendingRow` already uses for the identical shape. `.buttonStyle(.plain)` on each control fixes it. This also turned out to be the real root cause of the Cheers-alert finding above — see §4. Regression test: `FeedUITests.testFeedCheersToggleDoesNotOpenCommentsSheet`. | **High — Fixed** |
 
 ## ComposePostSheet
 
@@ -188,7 +200,8 @@ one — there is no error UI on this screen for a 15th operation to newly exerci
 
 | Rank | Severity | Finding | Where |
 |---|---|---|---|
-| 1 | **High — Fixed** | Cheers-toggle failure is completely silent — `cheersError` is set correctly but its `.alert` never presents; user gets a flip-and-revert with zero explanation. State itself is never wrong (see "The Cheers finding" above). **See "Fixes applied" below for the real root cause — it was not the two-`.alert` hypothesis.** | `FeedView.swift:106-113` |
+| 1 | **High — Fixed** | Cheers-toggle failure is completely silent — `cheersError` is set correctly but its `.alert` never presents; user gets a flip-and-revert with zero explanation. State itself is never wrong (see "The Cheers finding" above). **See "Fixes applied" §1/§4 below for the real root cause — it was not the two-`.alert` hypothesis, and the Menu/confirmationDialog-transition theory §1 originally landed on was also superseded by §4.** | `FeedView.swift:106-113` |
+| 1b | **High — Fixed** | Tapping `cheers-toggle` could spuriously open that post's `PostCommentsSheet` (`showingComments` flips `true` on the wrong control). Same root cause as #1 — see "Fixes applied" §4. | `FeedPostCard.swift:200-224` |
 | 2 | **Medium — Fixed** | `PlacePickerSheet` cannot distinguish "offline" from "no matches" — both silently fall back to the same UI via `try?`, with no error/offline messaging at all on this screen. | `PlacePickerSheet.swift:127-167` |
 | 3 | Low — Fixed | Feed's error `StatusView` uses the same `wifi.slash` icon for offline, server, *and* rate-limit — text is honest, icon overclaims "connectivity". | `FeedView.swift:68` |
 | 4 | Low | `PlacePickerSheet`'s idle/empty state is a bare blank list, no hint text — inconsistent with the designed empty states elsewhere in the app. | `PlacePickerSheet.swift:41-94` |
@@ -254,6 +267,23 @@ presentation-transaction race specific to a modal triggered by a plain `Button`'
 invoked, detached `Task`), not a defect in `toggleCheers` itself (its rollback logic was already
 correct — see "The Cheers finding, precisely" above, unchanged).
 
+**Correction (tap-routing pass, see §4 below): this Menu/confirmationDialog conclusion was a real,
+reproducible correlation, but not the actual mechanism.** The elimination list above never tested
+button style, because at the time nothing pointed at `FeedPostCard.footer`'s `CheersButton`/
+comments-`Button` pair as a suspect beyond being the tap targets themselves. §4 found that pair
+shares one `HStack` in a `List` row with no `buttonStyle` set on either, which lets a
+`cheers-toggle` tap get misrouted to the sibling comments `Button` and spuriously present
+`PostCommentsSheet` — and a sheet already mid-presentation is what actually blocked the alert
+(a second modal can't present over one already up). The delete flow's `Menu`/`confirmationDialog`
+never triggered that mis-route, which is why swapping the wiring correlated so cleanly with
+Menu/confirmationDialog presence — the correlation was real, the causal story attached to it
+wasn't. Fixing the button style alone (§4), with no change to presentation plumbing, was verified
+to make a reintroduced live-read `.alert` for `cheersError` present reliably. The wall-clock-delay
+evidence below is unaffected by this correction — a real delay genuinely did reproduce the same
+symptom, because it's *also* enough time for a human or a UI test to observe the sheet having
+opened and closed, or for another render pass to paper over the mis-route; it was never a safe
+signal of the actual mechanism, just a confound that happened to move in the same direction.
+
 **That delay was rejected as the shipped fix.** It is tuned to one machine on one day; it delays
 the user's own feedback for no reason they would understand; and a slower device, a cold launch,
 or a loaded CI runner can blow past a wall-clock guess that a fast one happens to clear today. A
@@ -301,13 +331,14 @@ in the picture at all. It reproduces with a plain `Button` calling a `Task` that
 synchronously fast (the same class of trigger as finding 1 itself), independent of the List's
 `.safeAreaInset`/wrapping structure, explicit row `.id`, or timing (0s/0.1s/0.5s delays before
 showing the banner all still show it) — ruling out everything this pass could test without
-starting a second, open-ended investigation. Logged here for visibility and future work, not
-fixed in this pass: it predates this change, it does not affect the correctness of any of the
-three findings above (`feed-cheers-error` renders with the right text regardless of whether the
-sheet also opens), and a real network failure's inherent latency — unlike the fault injector's
-zero-latency throw — may make it unreachable in production. The screenshot above was captured by
-defensively dismissing the sheet if it appeared, specifically so it would show the thing this
-finding is actually about.
+starting a second, open-ended investigation.
+
+**Status: fixed in the tap-routing pass — see §4 below.** It predated this change and was not
+introduced by moving Cheers to inline text, but it turned out not to be a separate, lesser
+curiosity either: it was the actual root cause of the Cheers-alert finding above, discovered by
+finally testing the one variable the elimination list never tried, button style. See §4 for the
+fix, the reliable (non-probabilistic) reproduction recipe, the regression test, and the controlled
+experiment that re-attributes the alert's original failure to this same cause.
 
 ### 2. `PlacePickerSheet` — offline vs. no-matches
 
@@ -356,11 +387,82 @@ must not show the same icon as a genuine outage`, and passes against the fix. Re
 -uiTestFailError rateLimited`) shows the hourglass icon next to "Couldn't load the feed" / "That's
 a lot at once — give it a moment."
 
+### 4. Cheers-toggle spuriously opens Comments — the real root cause, and a correction to §1
+
+**Hypothesis going in:** `FeedView` renders `List { ForEach(model.posts) { FeedPostCard(...) } }`
+(`FeedView.swift:147-148`), and `FeedPostCard.footer` (`FeedPostCard.swift:200-220`) puts two
+plain `Button`s — `CheersButton` and the comments button — in one `HStack`, with **no
+`buttonStyle` set anywhere on the card** (the only `buttonStyle` in the file was the unrelated
+`.bordered` on the paging-footer Retry button, `FeedView.swift:262`). Multiple plain `Button`s in
+one `List` row with no explicit style is a known SwiftUI hit-testing trap. Confirmed, not assumed:
+`FriendsView.pendingRow` (`FriendsView.swift:97-113`) has the identical shape — two plain `Button`s
+in one `HStack` in a `List` row — and already applies `.buttonStyle(.plain)` to each one
+individually; `FeedPostCard.footer` was the one place in this codebase that broke that established
+convention.
+
+**Fix:** `.buttonStyle(.plain)` on `CheersButton` and on the comments `Button` in
+`FeedPostCard.footer`. No visual change (`.plain` removes chrome that was never there), no timing
+element — each control becomes its own independently hit-tested target regardless of how fast or
+slow its action runs.
+
+**Verified as the actual cause, not a coincidental fix, three ways:**
+- **RED:** `FeedUITests.testFeedCheersToggleDoesNotOpenCommentsSheet` (added first, against
+  unmodified `HEAD`) fails with `XCTAssertFalse failed - tapping Cheers must not spuriously open
+  that post's comments sheet`, reproduced immediately on the very first tap — no wait, no retry,
+  matching the pre-existing finding's own observation that this doesn't self-correct.
+- **GREEN:** the same test passes once `.buttonStyle(.plain)` is added, with nothing else changed.
+- **Root-cause correction for §1, not just a second bug fixed by coincidence:** with the button-
+  style fix applied but *no other change*, the original pre-fix presentation of `cheersError` — a
+  live-read `.alert(isPresented: Binding(get: { model.cheersError != nil }, ...))`, temporarily
+  reintroduced purely as an experiment and removed again afterward — presented reliably across
+  three repeated runs (`app.alerts["Couldn't update Cheers"].waitForExistence(timeout: 10)`
+  succeeded every time). With the button-style fix reverted (same live-read `.alert`, `git stash`
+  used to isolate the one variable), the identical experiment failed identically to §1's original
+  finding, also across the runs checked. This is the causal proof, not a correlation: the Cheers
+  alert's non-presentation and the spurious-Comments-open defect were the **same bug** — the
+  mis-routed tap was intermittently firing the comments button's action (`showingComments = true`)
+  as well as (or instead of) `onToggleCheers`, and a sheet already presenting is what silently
+  blocked the alert from presenting over it. `FeedPostCard`'s delete flow never triggered this
+  because `Menu`/`confirmationDialog` aren't affected by `footer`'s missing button style at all —
+  the correlation §1 found was real, but attached to the wrong mechanism.
+
+**The shipped fix keeps the inline banner from §1, unchanged.** Inline content remains the better
+affordance for a failed Cheers tap regardless of whether the alert *can* now present — this
+section only corrects the historical record of *why* the alert used to fail, it does not revert
+§1's remedy. `cheersError` is still `Text`, still `accessibilityIdentifier("feed-cheers-error")`,
+still in the `safeAreaInset`; no app code from §1 changed.
+
+**Regression check (verified, not assumed, then reverted — none of this is in the shipped diff):**
+`FeedPostCard` sits in a row with a `Menu` (`postMenu`) and a `confirmationDialog`, and
+`PostCommentsSheet` has swipe-to-delete on comment rows — all three named as at-risk by this pass.
+A throwaway UI test (deleted after use, this project's established convention — see "regression
+suite or throwaway" below) drove, on top of the fix: a genuine tap on the comments button (sheet
+still opens correctly); adding and swipe-deleting a comment (swipe action still reveals Delete,
+deletion still removes the row); and the post-options `Menu` → "Delete this post" →
+`confirmationDialog` → confirm flow end-to-end (dialog still shows "Delete this post?"/"This can't
+be undone.", confirming still removes the post). A second throwaway test repeated the Cheers-tap
+and comments-tap checks at accessibility XXL Dynamic Type (`-UIPreferredContentSizeCategoryName
+UICTContentSizeCategoryAccessibilityXXL`, matching `docs/ACCESSIBILITY_AUDIT.md`'s own method) —
+both controls stayed tappable and correctly wired, and the spurious-open defect did not reappear at
+that size either. All of these passed; none is part of this commit.
+
 ### Final test counts
 
-147 `CheekyPintTests` (140 baseline + 7: 4 in `FeedViewTests.swift`, 3 in `PlacePickerTests.swift`),
-6 `CheekyPintUITests` (5 baseline + 1: `FeedUITests.testFeedCheersErrorShowsInlineMessage`), all passing.
-`CheekyPintCore` (77), `corecheck` (65), and the SQL suite (114) were untouched by this pass.
+As of the tap-routing pass (base HEAD `b7f4e85`): 147 `CheekyPintTests` (unchanged — this pass
+added no unit tests, only a UI test and a one-line-per-button view change), 7 `CheekyPintUITests`
+(6 baseline + 1: `FeedUITests.testFeedCheersToggleDoesNotOpenCommentsSheet`), all passing.
+`CheekyPintCore` (77) and `corecheck` (65) re-run and still passing — untouched by this pass, run
+anyway since the button-style fix lives in the app target. The SQL suite (114) was untouched (no
+file under `supabase/` changed) and not re-run this pass. Two throwaway UI tests
+(`testTEMPMenuDeleteConfirmationAndSwipeStillWork`, `testTEMPButtonsRemainUsableAtAccessibilityXXL`)
+verified no regression to the Menu/confirmationDialog/swipe/Dynamic-Type surfaces this fix could
+plausibly have touched, then were deleted — not part of this commit, matching this project's
+established throwaway-audit-test convention.
+
+Earlier in this document (the original audit pass, base HEAD `7c3f220`): 147 `CheekyPintTests`
+(140 baseline + 7: 4 in `FeedViewTests.swift`, 3 in `PlacePickerTests.swift`), 6 `CheekyPintUITests`
+(5 baseline + 1: `FeedUITests.testFeedCheersErrorShowsInlineMessage`), all passing. `CheekyPintCore`
+(77), `corecheck` (65), and the SQL suite (114) were untouched by that pass.
 
 ---
 
