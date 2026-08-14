@@ -55,6 +55,14 @@ enum DebugFaultInjector {
         static let reportUser = "reportUser"
         static let exportMyData = "exportMyData"
         static let fetchFriends = "fetchFriends"
+        /// `PlaceCompleter`'s live `MKLocalSearchCompleter` suggestions, not a `SupabaseRepository`
+        /// call — `MKLocalSearchCompleter` talks to Apple's own servers, so there is no repository
+        /// boundary to hang `throwIfFaulted` on the way every operation above does. `PlaceCompleter`
+        /// checks this and `isFaulted(_:)` directly, before it ever touches its real
+        /// `MKLocalSearchCompleter`, so a UI test can force "found nothing" or "the search itself
+        /// failed" deterministically instead of depending on the test environment's actual network
+        /// reachability (see `docs/STATE_AUDIT.md`'s PlacePickerSheet finding).
+        static let placeSearch = "placeSearch"
     }
 
     /// `ProcessInfo.arguments` cannot change after launch, so these are parsed once, not
@@ -91,6 +99,16 @@ enum DebugFaultInjector {
     /// itself (`[]`, typically), since this type has no way to know the caller's element type.
     static func isForcedEmpty(_ operation: String) -> Bool {
         forcedEmptyOperations.contains(operation)
+    }
+
+    /// Whether `operation` was named in `-uiTestFailOperation`, without throwing anything.
+    /// `throwIfFaulted` above is the right call at any site that already throws `SupabaseError` —
+    /// it folds "should this fail" and "with which error" into one call. `PlaceCompleter`'s search
+    /// isn't a `SupabaseError`-shaped operation at all (it's a `MKLocalSearchCompleter` callback,
+    /// not an async throwing repository method), so it needs the boolean on its own to decide
+    /// between its own two non-`SupabaseError` outcomes (`.noMatches` / `.failed`).
+    static func isFaulted(_ operation: String) -> Bool {
+        failingOperations.contains(operation)
     }
 
     /// Maps the `-uiTestFailError` string to the `SupabaseError` it names. Deliberately small and

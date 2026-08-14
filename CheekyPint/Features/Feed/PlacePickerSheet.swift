@@ -69,6 +69,28 @@ struct PlacePickerSheet: View {
                 ForEach(Array(completer.results.enumerated()), id: \.offset) { index, completion in
                     resultRow(completion, index: index)
                 }
+                // Two distinct states where MapKit returned no rows to list, told apart by
+                // `completer.status` (`docs/STATE_AUDIT.md`'s Medium finding): a genuine "nothing
+                // matches" reads as an affirmation that the search ran, while a failed lookup
+                // invites a retry instead. Neither one touches the "Use typed text" row above —
+                // that stays reachable either way, so a failed/offline search never blocks posting.
+                switch completer.status {
+                case .noMatches:
+                    Label("No matches for \u{201C}\(query)\u{201D}", systemImage: "magnifyingglass")
+                        .foregroundStyle(Theme.Palette.textSecondary)
+                        .listRowBackground(Color.clear)
+                        .accessibilityIdentifier("place-search-no-matches")
+                        .accessibilityLabel("No matches for \u{201C}\(query)\u{201D}")
+                case .failed:
+                    Label("Couldn't search right now. Check your connection and try again.",
+                          systemImage: "wifi.slash")
+                        .foregroundStyle(Theme.Palette.textSecondary)
+                        .listRowBackground(Color.clear)
+                        .accessibilityIdentifier("place-search-failed")
+                        .accessibilityLabel("Couldn't search right now. Check your connection and try again.")
+                case .idle, .results:
+                    EmptyView()
+                }
                 if isResolving {
                     HStack {
                         Spacer(minLength: 0)

@@ -41,6 +41,33 @@ final class PlacePickerTests: XCTestCase {
         XCTAssertEqual(place.label.count, 40, "80 code points of two-scalar clusters is 40 characters")
     }
 
+    // MARK: - PlaceCompleter.resolvedStatus (docs/STATE_AUDIT.md's Medium finding)
+
+    /// The concrete input that flips this test: before `PlaceSearchStatus` existed,
+    /// `PlaceCompleter.completer(_:didFailWithError:)` and a genuine zero-result
+    /// `completerDidUpdateResults` both did nothing but `results = []` — indistinguishable to
+    /// `PlacePickerSheet`. Reducing `resolvedStatus` back to always returning `.noMatches`
+    /// regardless of `failed` (verified by hand) turns this red again.
+    func testFailedSearchIsDistinctFromAGenuineZeroResultMatch() {
+        let failed = PlaceCompleter.resolvedStatus(resultsCount: 0, failed: true)
+        let noMatches = PlaceCompleter.resolvedStatus(resultsCount: 0, failed: false)
+        XCTAssertNotEqual(failed, noMatches,
+                           "a search that could not run must not look identical to one that ran and found nothing")
+        XCTAssertEqual(failed, .failed)
+        XCTAssertEqual(noMatches, .noMatches)
+    }
+
+    func testSuccessfulSearchWithResultsReportsResults() {
+        XCTAssertEqual(PlaceCompleter.resolvedStatus(resultsCount: 3, failed: false), .results)
+    }
+
+    /// A failure always wins over whatever `resultsCount` happens to be — `completer(_:
+    /// didFailWithError:)` always clears `results` to `[]` before calling this, but the rule
+    /// itself shouldn't depend on that call site remembering to.
+    func testFailureTakesPriorityOverAStaleNonZeroResultsCount() {
+        XCTAssertEqual(PlaceCompleter.resolvedStatus(resultsCount: 5, failed: true), .failed)
+    }
+
     func testPubCategoriesAreTreatedAsPubsAndOthersAsPlaces() {
         XCTAssertTrue(PlacePickerSheet.isPubCategory(.brewery))
         XCTAssertTrue(PlacePickerSheet.isPubCategory(.nightlife))
