@@ -39,11 +39,18 @@ final class FeedUITests: XCTestCase {
     }
 
     /// `docs/STATE_AUDIT.md`'s High finding: `FeedViewModel.toggleCheers` set `cheersError`
-    /// correctly on every failure, but `FeedView` used to attach two separate boolean-driven
-    /// `.alert` modifiers to the same view (one for `cheersError`, one for `deleteError`) — a
-    /// conflict SwiftUI does not resolve reliably, so the Cheers alert never actually presented and
-    /// a failed tap read as an unexplained flip-and-revert. Fixed by collapsing both into one
-    /// `.alert` keyed on an enum (`FeedAlert` in `FeedView.swift`).
+    /// correctly on every failure, but `FeedView`'s `.alert` for it never actually presented. The
+    /// "two `.alert` modifiers conflict" hypothesis this test originally targeted turned out to be
+    /// wrong — merging into one enum-keyed alert changed nothing. The real cause: a plain, un-menued
+    /// `Button`'s directly-invoked, detached `Task` mutating alert-driving state doesn't give
+    /// SwiftUI's modal-presentation machinery a native transition (a `Menu`/`confirmationDialog`,
+    /// which the sibling delete-error alert has) to settle against first — see `FeedView.swift`'s
+    /// `FeedAlert` doc for the elimination process. Rather than time around that with a wall-clock
+    /// deferral (tried, worked, rejected as fragile — tuned to one machine on one day), the fix
+    /// removes the failure mode: `cheersError` is now plain inline content
+    /// (`accessibilityIdentifier("feed-cheers-error")`), matching how every other transient error in
+    /// this app is reported. Inline content has no presentation step to race, so this needs no
+    /// deferral and no `sleep`/`Task.sleep` to observe.
     ///
     /// Targets Barnaby's post (the *second* seeded post, `cheers-toggle` index 1), not Alice's
     /// (index 0, already seeded at "2 Cheers") — Alice's rollback lands back on the same "2
@@ -51,7 +58,7 @@ final class FeedUITests: XCTestCase {
     /// even with a correct rollback. Barnaby's starts at zero/uncheered, so any lingering optimistic
     /// flip would be visibly wrong, not coincidentally identical to the untouched state.
     @MainActor
-    func testFeedCheersErrorAlertPresents() throws {
+    func testFeedCheersErrorShowsInlineMessage() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestDemo", "-uiTestFailOperation", "toggleCheers", "-uiTestFailError", "offline"]
         app.launch()
@@ -61,14 +68,11 @@ final class FeedUITests: XCTestCase {
         XCTAssertTrue(cheers.waitForExistence(timeout: 10), "Barnaby's post needs a Cheers control")
         cheers.tap()
 
-        let alert = app.alerts["Couldn't update Cheers"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 10),
-                      "a failed Cheers toggle must surface an alert naming the failure, not a silent flip-and-revert")
-        XCTAssertTrue(alert.staticTexts["You're offline. We'll try again when you're back."].exists,
-                      "the alert must carry the friendly, honest offline copy FeedViewModel set on cheersError")
-
-        alert.buttons["OK"].tap()
-        XCTAssertFalse(alert.exists, "OK must dismiss the alert")
-        XCTAssertTrue(cheers.isEnabled, "the row must stay usable after the alert is dismissed")
+        let errorText = app.staticTexts["feed-cheers-error"]
+        XCTAssertTrue(errorText.waitForExistence(timeout: 10),
+                      "a failed Cheers toggle must surface an inline message naming the failure, not a silent flip-and-revert")
+        XCTAssertEqual(errorText.label, "You're offline. We'll try again when you're back.",
+                       "the inline message must carry the friendly, honest offline copy FeedViewModel set on cheersError")
+        XCTAssertTrue(cheers.isEnabled, "the row must stay usable while the error is shown")
     }
 }

@@ -42,8 +42,14 @@ final class FeedViewModel {
     private(set) var hasMore = true
 
     /// Surfaced separately from `loadError`: a failed Cheers toggle shouldn't blank an
-    /// already-loaded feed into the full-screen error state — it's a transient alert instead,
-    /// the same pattern `LeaderboardView` uses for a failed Nudge.
+    /// already-loaded feed into the full-screen error state. Rendered by `FeedView` as an inline
+    /// message (matching `ComposePostSheet`/`PostCommentsSheet`/`ReportContentView`/
+    /// `DataExportView`'s inline error `Text`s), not a system `.alert` — a modal alert triggered
+    /// from a plain `Button`'s directly-invoked `Task` proved unreliable to present (see
+    /// `docs/STATE_AUDIT.md`'s "Fixes applied" section), and inline text has no such presentation
+    /// step to fail. Cleared at the start of the next `toggleCheers` attempt, the same
+    /// clear-on-retry convention those four screens use, since there's no longer a standalone
+    /// dismiss button.
     var cheersError: String?
 
     /// Mirrors `cheersError`'s reasoning for a failed post deletion — a transient alert, not a
@@ -266,6 +272,11 @@ final class FeedViewModel {
         guard !cheersInFlight.contains(post.id) else { return }
         cheersInFlight.insert(post.id)
         defer { cheersInFlight.remove(post.id) }
+        // Cleared on entry, matching every other inline-error surface in this app (`submit()`/
+        // `send()`/`export()` all clear their own error the same way) — `cheersError` is now
+        // rendered as an inline message in `FeedView`, not a dismiss-button alert, so a fresh
+        // attempt is the only thing that clears a stale one.
+        cheersError = nil
 
         let previousCheered = posts[index].viewerHasCheered
         let previousCount = posts[index].cheersCount

@@ -93,7 +93,7 @@ broken."
 | Failed `loadMore` mid-scroll | `FeedView.swift:128-148`; `/tmp/state-feed-loadmore-error.png` | A "Retry" pill appears in the list footer after scrolling past the (faulted) 21st post. Visually distinct from... | None — pass |
 | `loadMore` reaches the natural end | `FeedView.swift:128-148` (no branch fires once `loadError == nil && !hasMore`); `/tmp/state-feed-loadmore-end.png` | ...simply nothing: the list ends after post #20, straight into the tab bar, no footer at all. This *is* distinguishable from the error case (Retry pill present vs. absent) — answers the specific question below — but there is no positive "you've reached the end" affirmation either; the absence of a footer is the only signal. | Low — distinguishable (the requirement), but a silent stop is a minor UX gap on its own. |
 | Delete-post error | `FeedView.swift:114-121`; `/tmp/state-feed-delete-error.png` | `.alert("Couldn't delete that post", …)` **does** present (unlike Cheers below, before the fix), with "Something went wrong. Please try again." and an OK button. Confirmed dismissible: tapping OK clears it and the row's "Post options" menu is still usable immediately after — not stuck. | None — pass |
-| Cheers-toggle error | `FeedViewModel.swift:278-283`, `FeedView.swift`; `/tmp/state-feed-cheers-error-silent-failure.png`, `/tmp/state-feed-cheers-error-rollback-uncheered.png` (before), `/tmp/state-feed-cheers-alert-fixed.png` (after) | See "The Cheers finding" above for the state-is-never-wrong evidence (unchanged). **Fixed** — see "Fixes applied" below for the real root cause and why the two-`.alert` hypothesis was wrong. Re-screenshotted with `-uiTestFailOperation toggleCheers -uiTestFailError offline`: "Couldn't update Cheers" / "You're offline. We'll try again when you're back." presents over Barnaby's card, with OK dismissing it and the row staying usable. Regression test: `FeedUITests.testFeedCheersErrorAlertPresents`. | **High — Fixed** |
+| Cheers-toggle error | `FeedViewModel.swift:264-285`, `FeedView.swift`; `/tmp/state-feed-cheers-error-silent-failure.png`, `/tmp/state-feed-cheers-error-rollback-uncheered.png` (before), `/tmp/state-feed-cheers-inline-error-fixed.png` (after) | See "The Cheers finding" above for the state-is-never-wrong evidence (unchanged). **Fixed** — see "Fixes applied" below for the real root cause, why the two-`.alert` hypothesis was wrong, and why the shipped remedy is inline text rather than a timed alert. Re-screenshotted with `-uiTestFailOperation toggleCheers -uiTestFailError offline`: "You're offline. We'll try again when you're back." renders as an inline banner above Barnaby's card, with the row staying usable underneath it. Regression test: `FeedUITests.testFeedCheersErrorShowsInlineMessage`. | **High — Fixed** |
 
 ## ComposePostSheet
 
@@ -212,7 +212,8 @@ re-screenshot of the fixed state, read back as an image. The visual-verification
 gather those screenshots (`CheekyPintUITests/VerificationScreenshotTests.swift`) was, like
 `StateAuditUITests.swift` before it, deleted after use and is not part of this commit.
 
-### 1. Cheers alert — the real root cause, and why the two-`.alert` hypothesis was wrong
+### 1. Cheers alert — the real root cause, why the two-`.alert` hypothesis was wrong, and why the
+   shipped fix is inline text, not a timed alert
 
 The hypothesis going in was that two boolean-driven `.alert` modifiers chained on the same
 `Group` (one for `cheersError`, one for `deleteError`) conflict, and that only one can ever
@@ -223,8 +224,8 @@ while `deleteError`'s still did — proving the *count* of `.alert` modifiers wa
 variable, contrary to the hypothesis.
 
 The actual mechanism was isolated by elimination, each variable ruled out individually while
-holding the rest constant, all verified with the same UI test
-(`FeedUITests.testFeedCheersErrorAlertPresents`, forcing `toggleCheers` to fail via
+holding the rest constant, all verified with the same UI test (now
+`FeedUITests.testFeedCheersErrorShowsInlineMessage`, forcing `toggleCheers` to fail via
 `-uiTestFailOperation toggleCheers -uiTestFailError offline` and tapping Barnaby's — the
 *uncheered* — post's Cheers button):
 
@@ -246,29 +247,67 @@ un-menued `Button`. This was proven by swapping the wiring, not just observed as
 temporarily making `cheers-toggle` call `onDeletePost` (routing the *already-working* delete
 alert through a plain-button path) reproduced the silent failure; temporarily making the delete
 menu item skip its `confirmationDialog` (while staying inside the `Menu`) did not break it. A
-real `DispatchQueue.main.asyncAfter` delay of ~0.5s before the alert-driving state change
-reproduces the same effect `Menu`/`confirmationDialog` provide for free (0.25s was measured as
-not enough, 0.5s was, consistently, across repeated runs) — consistent with a SwiftUI/UIKit
-presentation-transaction timing issue specific to a modal triggered by a plain `Button`'s
-directly-invoked, detached `Task`, with no native modal transition to give the button's own tap
-handling time to settle first. This is not a defect in `toggleCheers`: its rollback logic was
-already correct (see "The Cheers finding, precisely" above, unchanged).
+real `DispatchQueue.main.asyncAfter` delay of ~0.5s before the alert-driving state change also
+reproduced the effect `Menu`/`confirmationDialog` provide for free (0.25s was measured as not
+enough, 0.5s was, consistently) — real evidence about *what kind* of bug this is (a SwiftUI/UIKit
+presentation-transaction race specific to a modal triggered by a plain `Button`'s directly
+invoked, detached `Task`), not a defect in `toggleCheers` itself (its rollback logic was already
+correct — see "The Cheers finding, precisely" above, unchanged).
 
-**The fix** (`FeedView.swift`): keeps the single enum-keyed alert (still the right shape for "more
-than one alert on a view," and there was no reason to regress that part), but drives it from a
-plain `@State private var presentedAlert: FeedAlert?` populated via `.onChange(of:
-model.cheersError)` / `.onChange(of: model.deleteError)`, rather than reading the `@Observable`
-properties live inside the alert's own `isPresented`/`presenting` closures. The Cheers path adds a
-`Self.cheersAlertDeferral` (0.5s) `DispatchQueue.main.asyncAfter` before promoting the value;
-`deleteError` needs none, since its own `Menu`/`confirmationDialog` already provides the gap.
+**That delay was rejected as the shipped fix.** It is tuned to one machine on one day; it delays
+the user's own feedback for no reason they would understand; and a slower device, a cold launch,
+or a loaded CI runner can blow past a wall-clock guess that a fast one happens to clear today. A
+timing constant is what you reach for when you can't express the actual condition — exactly the
+case where it hides the problem instead of solving it.
 
-Verified: `FeedUITests.testFeedCheersErrorAlertPresents` fails against the original two-alert code
-(confirmed by reinstating it temporarily) with
-`XCTAssertTrue failed - a failed Cheers toggle must surface an alert naming the failure, not a
-silent flip-and-revert`, and passes against the fix, consistently across repeated runs.
-Re-screenshotted: `/tmp/state-feed-cheers-alert-fixed.png` — "Couldn't update Cheers" / "You're
-offline. We'll try again when you're back." presents over Barnaby's card; OK dismisses it and the
-row stays usable.
+**The shipped fix removes the failure mode instead of timing around it: `cheersError` is no
+longer presented via `.alert` at all.** It is plain inline content in `FeedView`
+(`Text(cheersError)`, `accessibilityIdentifier("feed-cheers-error")`, pinned above the list via
+`.safeAreaInset(edge: .top)`), matching how every other transient error in this app is already
+reported (`ComposePostSheet`, `PostCommentsSheet`, `ReportContentView`, `DataExportView`). Inline
+content has no separate presentation step to race against — it is part of the same view-body
+evaluation that already, provably, reads `model.cheersError` correctly on every render — so
+nothing about *this* finding is timing-dependent any more: no `sleep`, no `Task.sleep`, no
+deferral, in the app or in the regression test. `deleteError` keeps its `.alert`, unchanged — its
+own `Menu`/`confirmationDialog` already gives it the transaction gap the modal needs, so it never
+needed fixing. `FeedViewModel.toggleCheers` now clears `cheersError` on entry, matching the
+clear-on-retry convention the other four inline-error screens already use (there's no dismiss
+button any more), and `AccessibilityAnnouncer` (the same type those four screens use) announces it
+for VoiceOver — presenting via `.alert` used to give that for free, and moving to inline text must
+not lose it.
+
+Verified: `FeedUITests.testFeedCheersErrorShowsInlineMessage` fails against a version of
+`FeedView` with the inline banner removed entirely (surfacing nothing, simulating the original
+silent failure) with
+`XCTAssertTrue failed - a failed Cheers toggle must surface an inline message naming the failure,
+not a silent flip-and-revert`, and passes against the fix, consistently across repeated runs, with
+no sleep anywhere in the assertion path. Re-screenshotted:
+`/tmp/state-feed-cheers-inline-error-fixed.png` — "You're offline. We'll try again when you're
+back." renders as a red inline banner at the top of the feed, above Barnaby's card (correctly
+rolled back to "0 Cheers"); the row stays usable underneath it.
+
+**A separate, pre-existing defect surfaced while diagnosing this — not one of this pass's three
+findings, and not introduced by the fix above.** While screenshotting, `cheers-toggle`'s tap was
+observed to sometimes *also* flip that same post's `showingComments` to `true`, spuriously opening
+`PostCommentsSheet` on top of the feed. This is not a screenshot artifact — confirmed via a full
+`app.debugDescription` accessibility-tree dump showing the Comments `NavigationBar` and its
+`Close` button genuinely present at the same moment `feed-cheers-error` is. Root-caused as
+pre-existing, not caused by moving Cheers to inline text: reproduced identically against the
+original, currently-shipped `.alert`-based code, checked immediately after the tap (before its
+0.5s delay elapses) — the glitch fires there too. The old code's alert only ever *looked* clean
+because presenting a new modal ~0.5s later happens to force-dismiss the wrongly-opened sheet;
+confirmed the glitch does **not** self-correct on its own by waiting 6 real seconds with no alert
+in the picture at all. It reproduces with a plain `Button` calling a `Task` that fails
+synchronously fast (the same class of trigger as finding 1 itself), independent of the List's
+`.safeAreaInset`/wrapping structure, explicit row `.id`, or timing (0s/0.1s/0.5s delays before
+showing the banner all still show it) — ruling out everything this pass could test without
+starting a second, open-ended investigation. Logged here for visibility and future work, not
+fixed in this pass: it predates this change, it does not affect the correctness of any of the
+three findings above (`feed-cheers-error` renders with the right text regardless of whether the
+sheet also opens), and a real network failure's inherent latency — unlike the fault injector's
+zero-latency throw — may make it unreachable in production. The screenshot above was captured by
+defensively dismissing the sheet if it appeared, specifically so it would show the thing this
+finding is actually about.
 
 ### 2. `PlacePickerSheet` — offline vs. no-matches
 
@@ -320,7 +359,7 @@ a lot at once — give it a moment."
 ### Final test counts
 
 147 `CheekyPintTests` (140 baseline + 7: 4 in `FeedViewTests.swift`, 3 in `PlacePickerTests.swift`),
-6 `CheekyPintUITests` (5 baseline + 1: `FeedUITests.testFeedCheersErrorAlertPresents`), all passing.
+6 `CheekyPintUITests` (5 baseline + 1: `FeedUITests.testFeedCheersErrorShowsInlineMessage`), all passing.
 `CheekyPintCore` (77), `corecheck` (65), and the SQL suite (114) were untouched by this pass.
 
 ---
