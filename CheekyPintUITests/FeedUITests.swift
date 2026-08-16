@@ -158,4 +158,87 @@ final class FeedUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Comments"].waitForExistence(timeout: 10),
                       "the comments button must still open the comments sheet")
     }
+
+    /// **The photo's tap target must be the photo, and nothing outside it.**
+    ///
+    /// The test above passes against the defect this one catches, and it is worth being precise
+    /// about why, because the same blind spot could be re-introduced tomorrow. It asserts only one
+    /// direction — *tapping the photo fires nothing else* — and it runs against demo mode's
+    /// bundled `demo-pint.png`, which is **landscape** (1200×900). `scaledToFill` inflates a
+    /// landscape photo in a 338×200 tile to only 338×253: a 27pt overhang that reaches nothing.
+    /// A photo taken on a phone is portrait, `ImageResizer` preserves the source aspect ratio, and
+    /// a 3:4 portrait photo inflates to 338×451 — a **125pt** overhang in each direction, which
+    /// swallows the post-options menu above and the whole Cheers/comments strip below. So the
+    /// shipped test was measuring the one aspect ratio the defect cannot show up in.
+    ///
+    /// `-uiTestPortraitPhoto` closes that gap in the seed data, and this test asserts the property
+    /// directly — the tap target's geometry — rather than only the consequence of one tap:
+    /// the photo's frame must not overlap any sibling control's frame, each sibling must still be
+    /// hittable and do its own job, and all of that must hold while the photo is still arriving
+    /// over the network (`-uiTestStallOperation imageLoad`, a `RemoteImage` held in `.loading`)
+    /// as well as once it has loaded — the tile is a fixed 200pt in both phases, so the tap target
+    /// has to be too. No `sleep` anywhere: every assertion reads geometry or hittability that is
+    /// already settled by the time `waitForExistence` returns.
+    @MainActor
+    func testFeedPhotoTapTargetIsConfinedToTheTile() throws {
+        for stalled in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-uiTestDemo", "-uiTestPortraitPhoto"]
+                + (stalled ? ["-uiTestStallOperation", "imageLoad"] : [])
+            app.launch()
+            app.tabBars.buttons["Feed"].tap()
+            let phase = stalled ? "still loading" : "loaded"
+
+            let photo = app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH 'feed-post-photo-'")).firstMatch
+            XCTAssertTrue(photo.waitForExistence(timeout: 10), "Barnaby's seeded photo post needs a tappable photo")
+
+            // Barnaby's card is the second one: index 1 of each per-card control.
+            let menu = app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH 'post-menu-'")).element(boundBy: 1)
+            let cheers = app.buttons.matching(identifier: "cheers-toggle").element(boundBy: 1)
+            let comments = app.buttons.matching(identifier: "post-comments-button").element(boundBy: 1)
+            XCTAssertTrue(menu.waitForExistence(timeout: 10))
+
+            XCTAssertFalse(photo.frame.intersects(menu.frame),
+                           "the photo's tap target must not overlap the post-options menu (\(phase))")
+            XCTAssertFalse(photo.frame.intersects(cheers.frame),
+                           "the photo's tap target must not overlap the Cheers toggle (\(phase))")
+            XCTAssertFalse(photo.frame.intersects(comments.frame),
+                           "the photo's tap target must not overlap the comments button (\(phase))")
+
+            // Geometry is the cause; reachability is what the user actually loses. The overhang
+            // made this control impossible to tap at all — XCUITest reports it as not hittable
+            // because the photo answers the hit test at the menu's own centre point.
+            XCTAssertTrue(menu.isHittable,
+                          "the post-options menu must stay tappable next to a portrait photo (\(phase))")
+            menu.tap()
+            let reportItem = app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH 'post-report-'")).firstMatch
+            XCTAssertTrue(reportItem.waitForExistence(timeout: 10),
+                          "the post-options menu must still open its own menu (\(phase))")
+            // Dismiss the menu without choosing anything.
+            app.tabBars.buttons["Feed"].tap()
+            XCTAssertTrue(reportItem.waitForNonExistence(timeout: 10))
+
+            // And the photo itself still does its one job, from a tap inside the drawn tile.
+            photo.tap()
+            XCTAssertTrue(app.buttons["photo-viewer-close"].waitForExistence(timeout: 10),
+                          "tapping the photo should open PhotoViewerView (\(phase))")
+            XCTAssertFalse(app.navigationBars["Comments"].exists,
+                           "tapping the photo must not open that post's comments sheet (\(phase))")
+            app.buttons["photo-viewer-close"].tap()
+            XCTAssertTrue(app.buttons["photo-viewer-close"].waitForNonExistence(timeout: 10))
+
+            // The siblings the overhang used to cover still do their own jobs, unchanged.
+            let cheersBefore = cheers.label
+            cheers.tap()
+            XCTAssertNotEqual(cheers.label, cheersBefore,
+                              "the Cheers toggle must still work next to a portrait photo (\(phase))")
+            comments.tap()
+            XCTAssertTrue(app.navigationBars["Comments"].waitForExistence(timeout: 10),
+                          "the comments button must still open the comments sheet (\(phase))")
+            app.terminate()
+        }
+    }
 }

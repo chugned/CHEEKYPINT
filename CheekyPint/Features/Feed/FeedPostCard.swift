@@ -22,10 +22,35 @@ struct FeedPostCard: View {
 
     @Environment(SessionController.self) private var session
 
-    @State private var showingComments = false
-    @State private var showingReport = false
+    /// Every modal this card can put on screen, as **one** value on **one** `@State`, presented
+    /// from **one** place — the card's root, below — rather than three booleans driving three
+    /// presentation modifiers attached to three different sibling subviews of the same `List` row
+    /// (the header's Report sheet, the photo's full-screen cover, the footer's Comments sheet),
+    /// which is the shape this card shipped with. Scattering presentations across a recycled
+    /// row's subviews is a known way to get the wrong modal, and this row has now produced three
+    /// separate mis-routing defects (`docs/STATE_AUDIT.md` §4, §5). One enum also makes "comments
+    /// and the photo viewer are both open" unrepresentable rather than merely unlikely, which is
+    /// the exact shape of the reported symptom. Same remedy `FeedView` already applies to its own
+    /// alerts via `FeedAlert`.
+    private enum CardPresentation: String, Identifiable {
+        case photo
+        case comments
+        case report
+
+        var id: String { rawValue }
+        /// The photo viewer is a `fullScreenCover`; the other two are sheets. Different
+        /// presentation styles, still one source of truth — see `body`.
+        var isCover: Bool { self == .photo }
+    }
+
+    @State private var presentation: CardPresentation?
+    /// Not part of `CardPresentation`: a `confirmationDialog` is an alert-family presentation on a
+    /// different channel from sheets/covers, and it is driven from inside `postMenu`'s `Menu`
+    /// rather than by a control in the row — the one presentation on this card that has never
+    /// mis-routed (`docs/STATE_AUDIT.md` §1/§4 both record the `Menu`/`confirmationDialog` path
+    /// behaving correctly throughout). It is hoisted to the card root with the rest all the same,
+    /// so "where does this card present things from" has exactly one answer.
     @State private var showingDeleteConfirmation = false
-    @State private var showingPhotoViewer = false
 
     /// Same route `MyQRView` already uses for "the signed-in user's own id"
     /// (`session.currentProfile?.id`) — not a new lookup invented for this card.
@@ -42,6 +67,51 @@ struct FeedPostCard: View {
             footer
         }
         .coasterCard()
+        // All four presentations, on the row's root, in one place. `item:` rather than
+        // `isPresented:` so the presented content is derived from the same value that decided to
+        // present it — there is no second piece of state for it to disagree with.
+        .sheet(item: sheetPresentation) { presented in
+            switch presented {
+            case .comments:
+                PostCommentsSheet(postID: post.id, onCommentCountChanged: onCommentCountChanged)
+            case .report:
+                ReportContentView(target: .post(id: post.id, hasPhoto: post.post.imagePath != nil))
+            case .photo:
+                // Unreachable: `sheetPresentation` filters `.photo` out. `CardPresentation` is
+                // deliberately not split into two enums — one value is the point — so this arm
+                // exists to keep the switch exhaustive without an `@unknown`-style catch-all that
+                // would silently absorb a genuinely new case added later.
+                EmptyView()
+            }
+        }
+        .fullScreenCover(item: coverPresentation) { _ in
+            PhotoViewerView(imageURL: imageURL, authorName: post.post.displayName)
+        }
+        .confirmationDialog(
+            "Delete this post?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { onDeletePost() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            // Plain, unambiguous: this is the one piece of copy the brief requires — deleting a
+            // post cannot be undone from the user's side, and the dialog must say so outright.
+            Text("This can't be undone.")
+        }
+    }
+
+    /// The sheet channel sees every case except the photo viewer; the cover channel sees only the
+    /// photo viewer. Both write straight back to the single `presentation` value, so a swipe-down
+    /// dismissal of either clears the same state the tap set.
+    private var sheetPresentation: Binding<CardPresentation?> {
+        Binding(get: { presentation?.isCover == true ? nil : presentation },
+                set: { presentation = $0 })
+    }
+
+    private var coverPresentation: Binding<CardPresentation?> {
+        Binding(get: { presentation?.isCover == true ? presentation : nil },
+                set: { presentation = $0 })
     }
 
     private var header: some View {
@@ -72,7 +142,7 @@ struct FeedPostCard: View {
     private var postMenu: some View {
         Menu {
             Button {
-                showingReport = true
+                presentation = .report
             } label: {
                 Label("Report", systemImage: "flag")
             }
@@ -96,21 +166,6 @@ struct FeedPostCard: View {
         }
         .accessibilityIdentifier("post-menu-\(post.id)")
         .accessibilityLabel("Post options")
-        .confirmationDialog(
-            "Delete this post?",
-            isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) { onDeletePost() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            // Plain, unambiguous: this is the one piece of copy the brief requires — deleting a
-            // post cannot be undone from the user's side, and the dialog must say so outright.
-            Text("This can't be undone.")
-        }
-        .sheet(isPresented: $showingReport) {
-            ReportContentView(target: .post(id: post.id, hasPhoto: post.post.imagePath != nil))
-        }
     }
 
     @ViewBuilder
@@ -161,37 +216,59 @@ struct FeedPostCard: View {
     private var photo: some View {
         if let imageURL {
             Button {
-                showingPhotoViewer = true
+                presentation = .photo
             } label: {
-                RemoteImage(url: imageURL) { phase in
-                    ZStack {
-                        Theme.Palette.backgroundPrimary
-                        switch phase {
-                        case .loading:
-                            ProgressView().tint(Theme.Palette.accent)
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        case .failure:
-                            photoUnavailablePlaceholder
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: Self.photoHeight, maxHeight: Self.photoHeight)
-                // `.clipShape` alone clips rendering to the rounded-rect bounds established by the
-                // frame above; a preceding plain `.clipped()` (which clips to the same rectangular
-                // bounds) has no additional effect once `.clipShape` is present, so it's dropped.
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
-                .accessibilityHidden(true)
+                tile(for: imageURL)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("feed-post-photo-\(post.id)")
             .accessibilityLabel("Photo posted by \(post.post.displayName)")
             .accessibilityHint("Opens the photo full screen")
-            .fullScreenCover(isPresented: $showingPhotoViewer) {
-                PhotoViewerView(imageURL: imageURL, authorName: post.post.displayName)
-            }
         }
     }
+
+    /// **The tile's tap target must be the tile, and nothing outside it.**
+    ///
+    /// This used to be `RemoteImage { ZStack { … image.scaledToFill() } }.frame(maxHeight:
+    /// photoHeight).clipShape(…)`. `scaledToFill` returns a size *larger* than the one it is
+    /// proposed — that is what "fill" means — so the `ZStack` reported the whole un-cropped image
+    /// rectangle as its size, e.g. 338×451 for a 3:4 phone photo in a 338×200 tile. The `.frame`
+    /// above it still *reported* 200pt to the enclosing `VStack` (so the card laid out correctly
+    /// and the picture looked right), and `.clipShape` clipped the *drawing* to 200pt — but
+    /// neither clips **hit testing or the accessibility frame**. The `Button`'s tap target was
+    /// therefore the full 451pt image rectangle, centred on a 200pt picture: 125pt of invisible,
+    /// tappable photo overhanging the header above and the Cheers/comments row below. The
+    /// post-options menu, which sits inside that overhang, became literally un-tappable — the
+    /// photo is a later sibling in the `VStack`, so it won every hit test in the overlap.
+    ///
+    /// The fix is structural, not a magic number: a `Color` carries the tile's size, the image
+    /// goes in an **`.overlay`** (an overlay is proposed its parent's size and can never inflate
+    /// it, unlike a `ZStack` child), and `.contentShape` pins the interactive region to exactly
+    /// the shape `.clipShape` draws. The label's layout size is now `photoHeight` in every
+    /// `RemoteImagePhase` — spinner, image, or placeholder — and for every source aspect ratio,
+    /// so the tap target cannot drift from the picture again. Nothing about the appearance
+    /// changes: the same `scaledToFill` crop, the same rounded corners.
+    private func tile(for imageURL: URL) -> some View {
+        Theme.Palette.backgroundPrimary
+            .frame(maxWidth: .infinity, minHeight: Self.photoHeight, maxHeight: Self.photoHeight)
+            .overlay {
+                RemoteImage(url: imageURL) { phase in
+                    switch phase {
+                    case .loading:
+                        ProgressView().tint(Theme.Palette.accent)
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        photoUnavailablePlaceholder
+                    }
+                }
+            }
+            .clipShape(Self.tileShape)
+            .contentShape(Self.tileShape)
+            .accessibilityHidden(true)
+    }
+
+    private static let tileShape = RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
 
     /// The failure phase, styled to read as "this photo just isn't available right now" rather
     /// than as a broken image the viewer should do something about — muted icon and caption,
@@ -232,7 +309,7 @@ struct FeedPostCard: View {
                 .buttonStyle(.plain)
             Spacer(minLength: 0)
             Button {
-                showingComments = true
+                presentation = .comments
             } label: {
                 Label("\(post.commentCount)", systemImage: "bubble.right")
                     .font(Theme.Typography.caption)
@@ -244,9 +321,6 @@ struct FeedPostCard: View {
             .accessibilityIdentifier("post-comments-button")
             .accessibilityLabel(commentCountAccessibilityLabel)
             .accessibilityHint("Opens the comments for this post")
-        }
-        .sheet(isPresented: $showingComments) {
-            PostCommentsSheet(postID: post.id, onCommentCountChanged: onCommentCountChanged)
         }
     }
 

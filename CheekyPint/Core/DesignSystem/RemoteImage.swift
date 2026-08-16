@@ -29,6 +29,12 @@ struct RemoteImage<Content: View>: View {
             return
         }
         phase = .loading
+        #if DEBUG
+        // Hold this image in `.loading` for the whole session — the deterministic stand-in for a
+        // post photo still arriving over the network from the private bucket, which demo mode's
+        // bundled file resolves too fast to ever exhibit. See `DebugFaultInjector.isStalled`.
+        if DebugFaultInjector.isStalled(DebugFaultInjector.Operation.imageLoad) { return }
+        #endif
         if let image = await ImageLoader.shared.image(for: url) {
             phase = .success(Image(uiImage: image))
         } else {

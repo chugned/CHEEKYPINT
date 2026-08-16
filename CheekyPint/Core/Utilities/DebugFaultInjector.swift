@@ -63,6 +63,13 @@ enum DebugFaultInjector {
         /// failed" deterministically instead of depending on the test environment's actual network
         /// reachability (see `docs/STATE_AUDIT.md`'s PlacePickerSheet finding).
         static let placeSearch = "placeSearch"
+        /// `RemoteImage`'s fetch through `ImageLoader`. Not a repository call either, and unlike
+        /// every operation above it is interesting *stalled* rather than failed: a post photo in
+        /// the real app comes over the network from a private bucket, so its `RemoteImage` sits in
+        /// `.loading` for a while before `.success`, whereas demo mode's bundled file resolves
+        /// almost immediately. `-uiTestStallOperation imageLoad` reproduces the network shape
+        /// deterministically — the phase simply never advances — with no wall-clock element.
+        static let imageLoad = "imageLoad"
     }
 
     /// `ProcessInfo.arguments` cannot change after launch, so these are parsed once, not
@@ -70,6 +77,7 @@ enum DebugFaultInjector {
     private static let arguments = ProcessInfo.processInfo.arguments
     private static let failingOperations = Set(values(after: "-uiTestFailOperation", in: arguments))
     private static let forcedEmptyOperations = Set(values(after: "-uiTestForceEmpty", in: arguments))
+    private static let stalledOperations = Set(values(after: "-uiTestStallOperation", in: arguments))
     private static let errorKind = values(after: "-uiTestFailError", in: arguments).first ?? "server"
 
     /// The flag's value is the next argument verbatim, split on commas — `-uiTestFailOperation
@@ -109,6 +117,16 @@ enum DebugFaultInjector {
     /// between its own two non-`SupabaseError` outcomes (`.noMatches` / `.failed`).
     static func isFaulted(_ operation: String) -> Bool {
         failingOperations.contains(operation)
+    }
+
+    /// Whether `operation` was named in `-uiTestStallOperation` — "this never completes", as
+    /// distinct from `isFaulted`'s "this fails" and `isForcedEmpty`'s "this succeeds with
+    /// nothing". A third outcome, because a request that is still in flight is a genuinely
+    /// different UI state from one that finished: `RemoteImage` renders a spinner for it, not an
+    /// image and not a placeholder. Deliberately *not* implemented as a long `Task.sleep` — the
+    /// call site simply returns without advancing its state, so nothing here depends on a clock.
+    static func isStalled(_ operation: String) -> Bool {
+        stalledOperations.contains(operation)
     }
 
     /// Maps the `-uiTestFailError` string to the `SupabaseError` it names. Deliberately small and

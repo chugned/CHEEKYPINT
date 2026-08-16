@@ -22,6 +22,13 @@ below and the new §4 for the fix, the elimination evidence, and the controlled 
 proves the correction (reverting to the original live-read `.alert` shape, on top of the button-
 style fix alone, makes it present reliably — see §4).
 
+**Update (photo tap-target pass, base HEAD `261a223`): a third tap-routing defect in this same
+`List` row.** `FeedPostCard`'s new photo `Button` — added in `261a223`, and added *carefully*, with
+the `.buttonStyle(.plain)` §4 established — had a tap target 2.25× the size of the picture it
+draws, because `.clipShape` clips drawing but not hit testing. See §5 for the mechanism, why the UI
+test that shipped alongside the feature passed against it, and the fix. The presentations scattered
+across that row's subviews were hoisted to one place at the same time.
+
 **Screens:** `FeedView`/`FeedPostCard`, `ComposePostSheet`, `PlacePickerSheet`,
 `PostCommentsSheet`, `ReportContentView`, `DataExportView`.
 
@@ -105,6 +112,7 @@ broken."
 | `loadMore` reaches the natural end | `FeedView.swift:128-148` (no branch fires once `loadError == nil && !hasMore`); `/tmp/state-feed-loadmore-end.png` | ...simply nothing: the list ends after post #20, straight into the tab bar, no footer at all. This *is* distinguishable from the error case (Retry pill present vs. absent) — answers the specific question below — but there is no positive "you've reached the end" affirmation either; the absence of a footer is the only signal. | Low — distinguishable (the requirement), but a silent stop is a minor UX gap on its own. |
 | Delete-post error | `FeedView.swift:114-121`; `/tmp/state-feed-delete-error.png` | `.alert("Couldn't delete that post", …)` **does** present (unlike Cheers below, before the fix), with "Something went wrong. Please try again." and an OK button. Confirmed dismissible: tapping OK clears it and the row's "Post options" menu is still usable immediately after — not stuck. | None — pass |
 | Cheers-toggle error | `FeedViewModel.swift:264-285`, `FeedView.swift`; `/tmp/state-feed-cheers-error-silent-failure.png`, `/tmp/state-feed-cheers-error-rollback-uncheered.png` (before), `/tmp/state-feed-cheers-inline-error-fixed.png` (after) | See "The Cheers finding" above for the state-is-never-wrong evidence (unchanged). **Fixed** — see "Fixes applied" below for the real root cause, why the two-`.alert` hypothesis was wrong, and why the shipped remedy is inline text rather than a timed alert. Re-screenshotted with `-uiTestFailOperation toggleCheers -uiTestFailError offline`: "You're offline. We'll try again when you're back." renders as an inline banner above Barnaby's card, with the row staying usable underneath it. Regression test: `FeedUITests.testFeedCheersErrorShowsInlineMessage`. | **High — Fixed** |
+| Photo tap target overflows the tile | `FeedPostCard.swift` (`photo`, `tile(for:)`); `/tmp/verify-portrait-card.png`, `/tmp/verify-loading-card.png`, `/tmp/verify-portrait-menu.png` | **Fixed — see "Fixes applied" §5.** The photo `Button`'s interactive region was the whole un-cropped `scaledToFill` image (338×451 for a portrait phone photo) rather than the 338×200 tile it draws, so 125pt of invisible photo overhung the header above and the Cheers/comments strip below; the post-options menu could not be tapped at all. `.clipShape` clips drawing, not hit testing. Fixed with a `Color`-sized tile + `.overlay` + `.contentShape`; the tap target is now exactly 200pt in every `RemoteImagePhase` and for every source aspect ratio. Regression test: `FeedUITests.testFeedPhotoTapTargetIsConfinedToTheTile`. | **High — Fixed** |
 | Cheers-toggle spuriously opens Comments | `FeedPostCard.swift:200-224` (`footer`) | **Fixed — see "Fixes applied" §4.** Tapping `cheers-toggle` could flip that same post's `showingComments` to `true`, opening `PostCommentsSheet` on top of the feed. Root cause: `footer`'s `CheersButton` and comments `Button` shared one `HStack` in a `List` row with no `buttonStyle` set on either — the one place in this codebase that broke the `.buttonStyle(.plain)`-per-button convention `FriendsView.pendingRow` already uses for the identical shape. `.buttonStyle(.plain)` on each control fixes it. This also turned out to be the real root cause of the Cheers-alert finding above — see §4. Regression test: `FeedUITests.testFeedCheersToggleDoesNotOpenCommentsSheet`. | **High — Fixed** |
 
 ## ComposePostSheet
@@ -202,6 +210,7 @@ one — there is no error UI on this screen for a 15th operation to newly exerci
 |---|---|---|---|
 | 1 | **High — Fixed** | Cheers-toggle failure is completely silent — `cheersError` is set correctly but its `.alert` never presents; user gets a flip-and-revert with zero explanation. State itself is never wrong (see "The Cheers finding" above). **See "Fixes applied" §1/§4 below for the real root cause — it was not the two-`.alert` hypothesis, and the Menu/confirmationDialog-transition theory §1 originally landed on was also superseded by §4.** | `FeedView.swift:106-113` |
 | 1b | **High — Fixed** | Tapping `cheers-toggle` could spuriously open that post's `PostCommentsSheet` (`showingComments` flips `true` on the wrong control). Same root cause as #1 — see "Fixes applied" §4. | `FeedPostCard.swift:200-224` |
+| 1c | **High — Fixed** | The photo `Button`'s tap target was the un-cropped `scaledToFill` image rectangle, not the 200pt tile it draws (`.clipShape` clips drawing, not hit testing). 125pt of invisible tappable photo above and below the picture for a portrait phone photo; the post-options menu became un-tappable outright. Reported from a real device as "when i click on the picture it opens up the comments?". See "Fixes applied" §5. | `FeedPostCard.swift` (`photo`/`tile(for:)`) |
 | 2 | **Medium — Fixed** | `PlacePickerSheet` cannot distinguish "offline" from "no matches" — both silently fall back to the same UI via `try?`, with no error/offline messaging at all on this screen. | `PlacePickerSheet.swift:127-167` |
 | 3 | Low — Fixed | Feed's error `StatusView` uses the same `wifi.slash` icon for offline, server, *and* rate-limit — text is honest, icon overclaims "connectivity". | `FeedView.swift:68` |
 | 4 | Low | `PlacePickerSheet`'s idle/empty state is a bare blank list, no hint text — inconsistent with the designed empty states elsewhere in the app. | `PlacePickerSheet.swift:41-94` |
@@ -446,7 +455,137 @@ UICTContentSizeCategoryAccessibilityXXL`, matching `docs/ACCESSIBILITY_AUDIT.md`
 both controls stayed tappable and correctly wired, and the spurious-open defect did not reappear at
 that size either. All of these passed; none is part of this commit.
 
+### 5. The photo's tap target was the whole un-cropped image, not the tile it draws
+
+**Reported from a real device, running Staging against hosted Supabase:** *"when i click on the
+picture it opens up the comments?"* Base HEAD `261a223`.
+
+**What was actually wrong, and how it was proved.** `FeedPostCard.photo` built its `Button` label
+as `RemoteImage { ZStack { Color; image.resizable().scaledToFill() } }.frame(maxWidth: .infinity,
+minHeight: 200, maxHeight: 200).clipShape(RoundedRectangle(...))`. `scaledToFill` returns a size
+*larger* than the one it is proposed — that is the whole meaning of "fill" — so the `ZStack`
+reported the entire un-cropped image rectangle as its size. The `.frame` above it still reported
+200pt to the enclosing `VStack` (so the card laid out correctly), and `.clipShape` clipped the
+*drawing* to 200pt (so the picture looked right) — but **neither one clips hit testing or the
+accessibility frame**. The `Button`'s interactive region was the full image rectangle, centred on a
+200pt picture.
+
+Measured directly, by reading `XCUIElement.frame` for `feed-post-photo-*` rather than inferring it:
+
+| Photo | Element frame | Drawn tile | Overhang, each direction |
+|---|---|---|---|
+| Demo seed, landscape 1200×900 | 338 × **253** | 338 × 200 | 27pt |
+| Portrait 3:4 (a phone photo) | 338 × **451** | 338 × 200 | **125pt** |
+| Still loading (`.loading` phase) | 338 × 200 | 338 × 200 | 0 |
+
+That overhang is invisible and tappable. It covers `header` above (the photo is a later sibling in
+the `VStack`, so it wins every hit test in that overlap) and `bodyText`/`footer` below. The
+concrete, reproducible consequence: with a portrait photo the post-options menu is **not tappable
+at all** — XCUITest refuses the tap outright, `Failed to not hittable: Button, {{326.0, 376.0},
+{44.0, 44.0}}, identifier: 'post-menu-…'`, because the photo answers the hit test at the menu's own
+centre point. The dead space in the Cheers/comments strip goes the same way. Cheers and the
+comments button themselves keep working (later siblings still win over the photo), and `List` cells
+clip the overhang at the row boundary, so it never reaches a neighbouring post — both verified by
+coordinate-tap probes, not assumed.
+
+**Why the aspect ratio is the whole story, and why it is not an exotic case.** `ImageResizer.jpeg`
+(`ComposePostSheet.swift:234`, `maxDimension: 1600`) preserves the source aspect ratio, so a post
+photo is whatever shape the camera produced — portrait, overwhelmingly. `261a223`'s own commit
+message names this: the feature exists because "a portrait photo showed only a narrow cropped
+band". The seeded demo photo, `demo-pint.png`, is the one shape that hides the defect.
+
+**Why the UI test that shipped with the feature passed while this was live.**
+`testFeedPhotoTapOpensViewerWithoutMisroutingOtherControls` is not a bad test; it is a test of the
+other direction, run against the one input that cannot fail it.
+- It asserts only that *tapping the photo fires nothing else*. It never asserts the converse — that
+  the photo's tap target is confined to the photo, and that the row's other controls are still
+  reachable. A control that has been swallowed whole is invisible to "did tapping X fire Y".
+- It runs in demo mode against the bundled **landscape** `demo-pint.png`, whose overhang is 27pt
+  and reaches nothing. The user hit this in Staging, where the photo is a real (portrait) phone
+  photo fetched over the network. Aspect ratio, not the network, is the variable — the `.loading`
+  phase was suspected first and cleared: a `RemoteImage` held in `.loading` reports a 338×200
+  frame, exactly the tile, because a `ProgressView` cannot inflate a `ZStack` the way
+  `scaledToFill` can.
+- It taps `photo.tap()`, i.e. the centre of the element's frame — which, for a centred overhang,
+  is still the centre of the drawn picture. The one point XCUITest picks is the one point that
+  behaves.
+
+**Verdict: salvageable, and kept.** It guards a real property (the photo tap must not fire Cheers,
+Comments or the menu) that nothing else covers, and that property did not regress. It is
+*insufficient*, not wrong, so it is complemented rather than replaced — by
+`testFeedPhotoTapTargetIsConfinedToTheTile`, which asserts the missing direction, against the
+missing input.
+
+**Fix, structural rather than a tuned number.** A `Color` carries the tile's size; the image moves
+into an **`.overlay`** (an overlay is proposed its parent's size and can never inflate it, unlike a
+`ZStack` child); `.contentShape` pins the interactive region to exactly the shape `.clipShape`
+draws. The label's layout size is now `photoHeight` in every `RemoteImagePhase` and for every
+source aspect ratio, so the tap target cannot drift from the picture again. No appearance change:
+same `scaledToFill` crop, same rounded corners — confirmed by screenshot, below.
+
+**Hoisted with it: all of the card's presentations, to the row's root, driven by one enum.**
+`FeedPostCard` attached `.sheet(isPresented: $showingReport)` to the header, `.fullScreenCover
+(isPresented: $showingPhotoViewer)` to the photo, and `.sheet(isPresented: $showingComments)` to
+the footer — three presentation modifiers on three sibling subviews of one recycled `List` row.
+They are now one `CardPresentation?` on the card's root (`.sheet(item:)` for comments/report,
+`.fullScreenCover(item:)` for the photo, `.confirmationDialog` alongside them), the same remedy
+`FeedView` already applies to its own alerts via `FeedAlert`. `item:` rather than `isPresented:`
+means the presented content is derived from the same value that decided to present it, and one
+enum makes "the comments sheet and the photo viewer are both open" unrepresentable rather than
+merely unlikely — which is the exact shape of the reported symptom. **Stated plainly: this part is
+hardening, not a proven fix.** No experiment in this pass produced a wrong *presentation*; every
+mis-routing observed was hit-testing, and the tap-target fix is the one with a red-to-green proof
+behind it. The hoist is kept because the shape it removes is a documented hazard, this row has now
+produced three defects, and the existing suite (Report sheet, Comments sheet, photo viewer, delete
+`confirmationDialog`) re-verifies every path it touches.
+
+**Verified:**
+- **RED:** `FeedUITests.testFeedPhotoTapTargetIsConfinedToTheTile`, run against `261a223`'s
+  `FeedPostCard.swift` restored verbatim over the rest of this pass's tree, fails with
+  `XCTAssertFalse failed - the photo's tap target must not overlap the post-options menu (loaded)`.
+- **GREEN:** it passes against the fix, in both the loaded and the still-loading phase, with the
+  photo's frame measured at exactly `(32.0, 432.0, 338.0, 200.0)` in both — the tile, and only the
+  tile.
+- **Screenshots, read back as images, in the portrait/network-loaded shape the defect needs, not
+  the demo-bundled landscape one:** `/tmp/verify-portrait-card.png` — Barnaby's portrait photo
+  cropped to the same 200pt rounded tile as before, body text and Cheers/comments row unchanged;
+  `/tmp/verify-loading-card.png` (`-uiTestStallOperation imageLoad`) — the same 200pt tile with a
+  spinner, identical footprint, which is what makes the phase irrelevant to the tap target;
+  `/tmp/verify-portrait-menu.png` — the post-options menu open on that same portrait card, showing
+  "Report", the control that could not be tapped at all before this fix.
+- **No timing element anywhere:** no `sleep`, `Task.sleep`, `asyncAfter` or tuned threshold in the
+  app or the test. Every assertion reads geometry or hittability that is already settled.
+
+**What could not be verified, stated rather than papered over.** The literal reported symptom —
+tapping the picture opening the *comments sheet* — was never reproduced in the simulator, across:
+`.loading` vs `.success` phase; landscape vs portrait vs caption-less posts; adjacent photo posts;
+scroll/recycle, pull-to-refresh, `loadMore`, tab-away-and-back; opening the compose sheet, the
+Report sheet, the comments sheet or Cheers immediately beforehand; a 3×3 grid of coordinate taps
+across the drawn tile; accessibility XXL; slight-drag and double taps. What *was* reproduced is a
+deterministic wrong-control tap-routing defect in exactly that `Button`, of exactly the family this
+row has now produced twice before. Two gaps remain: the app could not be pointed at the real
+private bucket (no credentials available to this pass — the network-in-flight state is stood in for
+by `DebugFaultInjector`'s new `imageLoad` stall seam, and the real photo *shape* by
+`-uiTestPortraitPhoto`), and only the iOS 26.5 simulator runtime is installed, so an iOS-version-
+specific presentation difference on the reporter's own phone could not be excluded.
+
+**New permanent infrastructure (small, `#if DEBUG`, matching the `placeSearch` precedent):**
+`DebugFaultInjector.isStalled(_:)` + `-uiTestStallOperation` + `Operation.imageLoad` — a third
+outcome alongside "fails" and "succeeds with nothing", because a request still in flight is a
+genuinely different UI state; it is a plain early return with no clock involved.
+`DemoWorld.demoPhotoFilename` + `-uiTestPortraitPhoto` + `Resources/DemoAssets/demo-pint-portrait.png`
+— the seed's photo could only ever be landscape, which is precisely why this shipped.
+
 ### Final test counts
+
+As of the photo tap-target pass (base HEAD `261a223`): 147 `CheekyPintTests` (unchanged — this pass
+added no unit tests; the defect is geometry the simulator has to measure, which no unit test can
+see), 9 `CheekyPintUITests` (8 baseline + 1:
+`FeedUITests.testFeedPhotoTapTargetIsConfinedToTheTile`), `CheekyPintCore` 77 and `corecheck` 65
+re-run and passing. The SQL suite (114) was untouched — nothing under `supabase/` changed — and was
+not re-run. Two throwaway UI test files (`PhotoTapReproTests.swift`, the reproduction sweep, and
+`VerificationScreenshotTests.swift`, the screenshot pass) were deleted after use, matching this
+project's established convention below.
 
 As of the tap-routing pass (base HEAD `b7f4e85`): 147 `CheekyPintTests` (unchanged — this pass
 added no unit tests, only a UI test and a one-line-per-button view change), 7 `CheekyPintUITests`

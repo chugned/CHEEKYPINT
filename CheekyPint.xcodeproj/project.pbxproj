@@ -90,6 +90,7 @@
 		AEDFC5D78379A7892E004150 /* PrivacyChoicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 400FCC410C9213C6AA6E9B1B /* PrivacyChoicesView.swift */; };
 		B7C2E9813A10407284B257F3 /* SupabaseAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7273023994D1632D9EE2E815 /* SupabaseAuth.swift */; };
 		BA9349721E2626A898247C7E /* FeedPostCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A42488FE5DD8A2106C873D /* FeedPostCard.swift */; };
+		BDB04FE7113D67D1D8A98CD7 /* demo-pint-portrait.png in Resources */ = {isa = PBXBuildFile; fileRef = 9833AC9790AF4C9613C1C2EC /* demo-pint-portrait.png */; };
 		BFBA9EEAAF2CBF212725A4CF /* EditProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A28C4771ADDE62DBDEE18120 /* EditProfileView.swift */; };
 		C49AF8863772058146A69379 /* FriendPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04363ACFD4B5C9A0A9F3E0EF /* FriendPreviewView.swift */; };
 		CC3E4C6D738D168F2608A01D /* FeedViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9BC8826EA795ACEF94BE379 /* FeedViewTests.swift */; };
@@ -194,6 +195,7 @@
 		92B264CA1989F6776444F735 /* PubsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PubsView.swift; sourceTree = "<group>"; };
 		92F0B2D8EC8B2BE4982FB23A /* demo-pint.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "demo-pint.png"; sourceTree = "<group>"; };
 		93C8D775D6CB641A5C876957 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		9833AC9790AF4C9613C1C2EC /* demo-pint-portrait.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "demo-pint-portrait.png"; sourceTree = "<group>"; };
 		9879D47ABAB68FD0138B436B /* ComposePostSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposePostSheet.swift; sourceTree = "<group>"; };
 		992A7152E72932A1AD45B8E7 /* DeleteAccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteAccountView.swift; sourceTree = "<group>"; };
 		9A04B8A45B27EB5E594B5172 /* ProfileRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileRepository.swift; sourceTree = "<group>"; };
@@ -430,6 +432,7 @@
 		7D79B6ADB3A9B6C60994C097 /* DemoAssets */ = {
 			isa = PBXGroup;
 			children = (
+				9833AC9790AF4C9613C1C2EC /* demo-pint-portrait.png */,
 				92F0B2D8EC8B2BE4982FB23A /* demo-pint.png */,
 			);
 			path = DemoAssets;
@@ -759,6 +762,7 @@
 				CC4032FC0B02D6D6BDD8E0DC /* OFL.txt in Resources */,
 				982E6F4DED407608BB6C11F9 /* Preview Assets.xcassets in Resources */,
 				60C1CA754117A072F6D185DB /* PrivacyInfo.xcprivacy in Resources */,
+				BDB04FE7113D67D1D8A98CD7 /* demo-pint-portrait.png in Resources */,
 				6F396835EAD4790FBC086BBA /* demo-pint.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

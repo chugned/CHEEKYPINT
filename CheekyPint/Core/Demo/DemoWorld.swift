@@ -78,6 +78,19 @@ actor DemoWorld {
     /// `feedPage`'s cursor comparison relies on that for its own bookkeeping here.
     private static let feedTimestampStyle = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
 
+    /// The bundled photo the seeded photo post points at. Landscape (1200×900) by default;
+    /// `-uiTestPortraitPhoto` swaps in the portrait (1200×1600) variant, the shape a photo taken
+    /// on a phone actually has — `ImageResizer` preserves the source aspect ratio, so a real post
+    /// photo is portrait far more often than not, while this seed has only ever been landscape.
+    private static var demoPhotoFilename: String {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-uiTestPortraitPhoto") {
+            return "demo-pint-portrait.png"
+        }
+        #endif
+        return "demo-pint.png"
+    }
+
     var currentProfile: Profile { profile }
 
     /// Turn on friend-circle mode and seed data. Idempotent, but always refreshes the local
@@ -153,7 +166,7 @@ actor DemoWorld {
                              cheers: 2, cheered: true)
         let barnabyPost = post(90, author: Self.barnabyID,
                                body: "Snapped this one before it went flat.",
-                               imagePath: ProfileRepository.localPostImagePrefix + "demo-pint.png")
+                               imagePath: ProfileRepository.localPostImagePrefix + Self.demoPhotoFilename)
         let ceriPost = post(180, author: Self.ceriID, body: "Quiet one tonight.")
         // Filler posts, older than all three named posts above so they never bump Alice's/
         // Barnaby's/Ceri's out of page one: `FeedViewModel`'s default `pageSize` is 20, and until
