@@ -4,5 +4,5 @@ APP_ENV = staging
 APP_DISPLAY_NAME = CheekyPint Staging
 PRODUCT_BUNDLE_IDENTIFIER = app.cheekypint.CheekyPint.staging
 
-SUPABASE_URL = https:/$()/YOUR-STAGING-REF.supabase.co
-SUPABASE_ANON_KEY = REPLACE_WITH_STAGING_ANON_KEY
+SUPABASE_URL = https:/$()/jjukipixyafhgouxpotx.supabase.co
+SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpqdWtpcGl4eWFmaGdvdXhwb3R4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4NDY5ODYsImV4cCI6MjEwMjQyMjk4Nn0.eU35oX1crvUnI6R3OhydUa48PKxCTZiYQ34s-W966XU
