@@ -123,9 +123,15 @@ actor SupabaseAuth {
 
         let (data, response) = try await send(request)
         guard let http = response as? HTTPURLResponse else { throw SupabaseError.unknown("No response") }
-        guard (200..<300).contains(http.statusCode) else { throw SupabaseError.from(status: http.statusCode, body: data) }
+        // `fromAuth`, not `from`: this endpoint is GoTrue, whose error envelope differs from
+        // PostgREST's. See `SupabaseError.fromAuth`'s doc for what the PostgREST mapping turns a
+        // rate-limited send and a mistyped code into.
+        guard (200..<300).contains(http.statusCode) else { throw SupabaseError.fromAuth(status: http.statusCode, body: data) }
         if Response.self == EmptyResponse.self { return EmptyResponse() as! Response }
-        return try SupabaseJSON.decoder.decode(Response.self, from: data)
+        // `goTrueDecoder`, not `SupabaseJSON.decoder` — see its doc. The shared decoder's
+        // `.convertFromSnakeCase` makes `GoTrueTokenResponse`'s explicit `"access_token"` key
+        // unmatchable, and every token exchange throws on a successful response.
+        return try SupabaseJSON.goTrueDecoder.decode(Response.self, from: data)
     }
 
     private func send(_ request: URLRequest) async throws -> (Data, URLResponse) {

@@ -2,10 +2,22 @@
 
 This build is tuned for a private friend group rather than public auth.
 
+> **Superseded (2026-08-16): sign-in is real now.** The surname-only entry described below is
+> gone. `AuthView` asks for an email address and the six-digit code Supabase emails back, and a
+> verified session means every repository call reaches the hosted backend instead of `DemoWorld`'s
+> local fixtures — which is what makes friends, feed, cheers, comments and mentions work *between*
+> phones rather than only within one. `DemoWorld` itself is unchanged and still reachable via the
+> DEBUG "Explore in demo mode" button and the `-uiTestDemo` launch argument.
+>
+> Everything below about beers, pubs, the live map and the leaderboard still holds. Only the
+> first two bullets are historical.
+
 ## What Changed
 
-- Entry is surname-only. No Apple sign-in, email OTP, or third-party login UI.
-- The surname is stored locally on the phone and used as the local profile name.
+- ~~Entry is surname-only. No Apple sign-in, email OTP, or third-party login UI.~~ Entry is now
+  email + a six-digit code (no password, no Apple sign-in — that needs a paid developer account).
+- ~~The surname is stored locally on the phone and used as the local profile name.~~ The display
+  name is set during profile setup and stored server-side.
 - The main pint action is now a beer glass image that fills as pints are recorded.
 - The logging sheet shows the beer catalog as a searchable list of tappable rows (name, country,
   style); no beer photos are shown.

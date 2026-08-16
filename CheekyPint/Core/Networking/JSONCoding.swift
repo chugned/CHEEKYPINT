@@ -28,6 +28,21 @@ enum SupabaseJSON {
         return encoder
     }()
 
+    /// GoTrue (`/auth/v1/...`) gets a **plain** decoder — no `.convertFromSnakeCase`.
+    ///
+    /// Not a stylistic split. `keyDecodingStrategy` rewrites each incoming key *before* it is
+    /// matched against `CodingKeys`, so `.convertFromSnakeCase` turns `access_token` into
+    /// `accessToken` and then fails to find it under `GoTrueTokenResponse`'s own
+    /// `case accessToken = "access_token"`. Every auth type here spells its wire names out
+    /// explicitly, which is only correct against a decoder that leaves keys alone.
+    ///
+    /// This is not hypothetical: `GoTrueTokenResponse` was decoded with the shared decoder above,
+    /// so `verifyEmailOTP`, `signInWithApple` and `refresh` all threw
+    /// `keyNotFound("access_token")` on a perfectly good 200. Nothing noticed because nothing in
+    /// the app had ever called them — the whole auth surface was unreachable behind the old
+    /// surname screen. `EmailOTPAuthTests`' live sign-in is what caught it.
+    static let goTrueDecoder = JSONDecoder()
+
     // ISO8601DateFormatter is documented as thread-safe but isn't Sendable; these are only ever
     // read, so `nonisolated(unsafe)` is correct and avoids re-allocating a formatter per call.
     nonisolated(unsafe) static let iso8601: ISO8601DateFormatter = {

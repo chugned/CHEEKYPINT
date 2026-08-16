@@ -15,10 +15,13 @@ final class SessionController {
 
     let container: AppContainer
     private(set) var phase: Phase = .loading
-    private let surnameKey = "CheekyPint.friendCircleSurname"
 
-    /// Age confirmation is collected pre-auth (§17). We hold it here until we have a user to
-    /// persist it against, immediately after sign-in.
+    /// Age confirmation is collected pre-auth (§17), so it has no user to be stored against when
+    /// it is given. It is written at the *end* of profile setup, in the same PATCH as the display
+    /// name — not the instant a session appears — because `legal_age_confirmed_at` is also the
+    /// `.onboarding` → `.ready` gate below. Recording it at sign-in would mark a brand-new user as
+    /// set up before they had entered a name, and hand them straight to `MainTabView` with the
+    /// local part of their email address for a display name.
     var pendingAgeConfirmed = false
 
     init(container: AppContainer) {
@@ -28,8 +31,14 @@ final class SessionController {
     /// Launch-time work, called once from `CheekyPintApp`'s root `.task`.
     ///
     /// The sweep comes first, before any early return below, because it must happen on every
-    /// launch regardless of which phase the app resolves to — including the `-uiTestDemo` and
-    /// friend-circle paths, and including a launch that ends signed out.
+    /// launch regardless of which phase the app resolves to — including the `-uiTestDemo` path,
+    /// and including a launch that ends signed out.
+    ///
+    /// The phase decision, in order: demo mode if the UI-test argument asked for it; otherwise
+    /// signed out unless the Keychain holds a session; otherwise that session is proven usable
+    /// (refreshing it if the access token has expired) and the caller's own `profiles` row is
+    /// read, whose `legal_age_confirmed_at` decides `.onboarding` (set-up unfinished) from
+    /// `.ready`.
     func bootstrap() async {
         sweepStaleTemporaryExports()
         #if DEBUG
@@ -39,12 +48,42 @@ final class SessionController {
             return
         }
         #endif
-        if let surname = UserDefaults.standard.string(forKey: surnameKey), !surname.isEmpty {
-            await DemoWorld.shared.activate(surname: surname)
-            phase = .ready(await DemoWorld.shared.currentProfile)
+        guard await container.auth.hasSession else {
+            // No keychain session: nothing to restore. `deactivate()` rather than "leave it
+            // alone" because a launch that ends signed out must not inherit a demo world from
+            // whatever ran before it in this process.
+            await DemoWorld.shared.deactivate()
+            phase = .signedOut
             return
         }
-        phase = .signedOut
+        do {
+            // Proves the stored session is still usable before the app commits to a signed-in
+            // phase: `validAccessToken()` refreshes when the access token has expired, which it
+            // will have on any launch more than an hour after the last one, and throws if GoTrue
+            // has since rejected the refresh token.
+            _ = try await container.auth.validAccessToken()
+        } catch {
+            // A refresh token GoTrue no longer accepts is dead — keeping it would make every
+            // subsequent request fail the same way. Clear it and start clean.
+            await signOut()
+            return
+        }
+        await adoptRealSession()
+    }
+
+    /// The single funnel for "a real Supabase session is now in force". Every path that ends with
+    /// one goes through here — a fresh code sign-in and a cold launch that restored the keychain
+    /// alike — because the invariant it enforces is what makes the rest of the app talk to the
+    /// backend at all.
+    ///
+    /// `DemoWorld.shared.isActive` is checked at the top of every repository method; while it is
+    /// true, *no* call reaches Supabase, and two phones stay two isolated local worlds no matter
+    /// how correct the server is. So a real session and an active demo world must never coexist,
+    /// and the deactivation happens here, before the first profile read, rather than being left to
+    /// each caller to remember.
+    private func adoptRealSession() async {
+        await DemoWorld.shared.deactivate()
+        await refreshProfile()
     }
 
     /// Deletes anything left in `DataExportView.exportDirectory` from a previous run.
@@ -75,17 +114,32 @@ final class SessionController {
         } catch SupabaseError.notAuthenticated {
             phase = .signedOut
         } catch {
-            // Keep the user signed in but show onboarding if we can't yet read a profile.
+            // Any other failure (offline, a 5xx) also lands on the welcome flow, because there is
+            // no phase for "signed in, profile unread" and inventing one is a bigger change than
+            // this. The Keychain session is deliberately left intact, so this is recoverable:
+            // signing in again with the same address restores the same account rather than
+            // stranding it.
             phase = .signedOut
         }
     }
 
+    // MARK: Email one-time-code sign-in
+
+    /// Step 1: ask GoTrue to email a six-digit code, creating the user if this address is new
+    /// (`auth_bootstrap`'s `on_auth_user_created` trigger gives them a `profiles` and a
+    /// `privacy_settings` row in the same transaction, so a brand-new user always has both).
+    func sendSignInCode(to email: String) async throws {
+        try await container.auth.sendEmailOTP(email: email)
+    }
+
+    /// Step 2: exchange the code for a session, then adopt it.
+    func signIn(email: String, code: String) async throws {
+        _ = try await container.auth.verifyEmailOTP(email: email, token: code)
+        await adoptRealSession()
+    }
+
     func didAuthenticate() async {
-        // Persist the pre-auth age confirmation as soon as we have a session.
-        if pendingAgeConfirmed {
-            try? await container.profiles.confirmLegalAge()
-        }
-        await refreshProfile()
+        await adoptRealSession()
     }
 
     func completeOnboarding() async {
@@ -100,20 +154,8 @@ final class SessionController {
         // it — see ImageLoader.clear()'s doc. Sign-out is the common exit from any authenticated
         // session, so this is the primary place that guarantee is enforced.
         await ImageLoader.shared.clear()
-        UserDefaults.standard.removeObject(forKey: surnameKey)
         pendingAgeConfirmed = false
         phase = .signedOut
-    }
-
-    /// Friend-circle mode: no third-party auth, just a locally persisted surname and the
-    /// in-memory backend that powers the rest of the app.
-    func enterFriendCircleMode(surname: String) async {
-        let clean = surname.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return }
-        pendingAgeConfirmed = true
-        UserDefaults.standard.set(clean, forKey: surnameKey)
-        await DemoWorld.shared.activate(surname: clean)
-        phase = .ready(await DemoWorld.shared.currentProfile)
     }
 
     /// DEBUG-only: skip auth entirely and explore the app with seeded, in-memory data.

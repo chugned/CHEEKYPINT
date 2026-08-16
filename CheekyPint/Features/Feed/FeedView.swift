@@ -232,7 +232,7 @@ struct FeedView: View {
             return "wifi.slash"
         case .rateLimited:
             return "hourglass"
-        case .notAuthenticated, .forbidden:
+        case .notAuthenticated, .forbidden, .invalidOrExpiredCode:
             return "lock"
         case .notFound:
             return "questionmark.circle"

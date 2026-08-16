@@ -7,5 +7,8 @@ PRODUCT_BUNDLE_IDENTIFIER = app.cheekypint.CheekyPint.dev
 
 SUPABASE_URL = http:/$()/127.0.0.1:54321
 // Local Supabase's fixed demo anon key is safe to commit; a real project's anon key is also
-// non-secret (RLS protects data). Replace when pointing at a hosted project.
-SUPABASE_ANON_KEY = REPLACE_WITH_LOCAL_ANON_KEY
+// non-secret (RLS protects data). Replace when pointing at a hosted project. This exact value is
+// the one `supabase start` prints for every project on every machine — it is signed with the
+// published `super-secret-jwt-token-with-at-least-32-characters-long` development JWT secret and
+// grants nothing beyond the `anon` role against a database that only exists on this laptop.
+SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0

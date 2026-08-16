@@ -9,8 +9,14 @@ struct AppContainer: Sendable {
     let data: SupabaseData
     let analytics: any AnalyticsService
 
-    init(config: AppConfig = .current, analytics: any AnalyticsService = NoOpAnalytics()) {
-        let auth = SupabaseAuth(config: config)
+    /// `auth` is injectable for one reason: `SupabaseAuth` persists into the Keychain under a
+    /// fixed service name, and the app and its unit-test bundle share a bundle id and therefore
+    /// share that Keychain. A test that signs in for real would otherwise leave a live session
+    /// behind for the UI tests to launch into, and they expect the welcome screen. Tests pass a
+    /// `SupabaseAuth` built on a per-test Keychain service; the app never passes anything.
+    init(config: AppConfig = .current, analytics: any AnalyticsService = NoOpAnalytics(),
+         auth: SupabaseAuth? = nil) {
+        let auth = auth ?? SupabaseAuth(config: config)
         self.config = config
         self.auth = auth
         self.data = SupabaseData(config: config, auth: auth)

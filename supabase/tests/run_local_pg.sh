@@ -34,6 +34,14 @@ for f in $(ls "$SUPA"/migrations/*.sql | sort); do
   psql -d cheekypint_test -f "$f" >/dev/null 2>/tmp/cp_err && echo ok || { echo FAILED; cat /tmp/cp_err; exit 1; }
 done
 
+# Before the shim over-grants: the client's own table grants have to hold off the migrations
+# alone. See client_grants_check.sql for why this cannot live inside the main suite.
+# `|| exit 1` is load-bearing: this script runs without `set -e`, so its status is whatever the
+# last command returned. Without this, a failed grants check prints FAIL and the run still ends
+# "ALL RLS/RPC CHECKS PASSED" with exit 0.
+echo "== client table grants (migrations only) =="
+psql -d cheekypint_test -f "$HERE/client_grants_check.sql" || exit 1
+
 echo "== grants + seed =="
 psql -d cheekypint_test -f "$HERE/_shim_grants.sql" >/dev/null
 psql -d cheekypint_test -f "$SUPA/seed.sql" >/dev/null

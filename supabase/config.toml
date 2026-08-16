@@ -32,12 +32,39 @@ jwt_expiry = 3600
 enable_signup = true
 minimum_password_length = 8
 
-# Email magic link is the secondary auth method (Sign in with Apple is configured in the
-# hosted dashboard because it needs Apple keys — see docs/APP_STORE_SUBMISSION.md).
+# Email one-time code is the app's only sign-in method today (Sign in with Apple needs a paid
+# developer account for the entitlement — see docs/APP_STORE_SUBMISSION.md).
+#
+# `enable_confirmations` must stay true: with it off, `/otp` auto-confirms a new address and sends
+# no email at all, so there is no code to type.
 [auth.email]
 enable_signup = true
 enable_confirmations = true
 secure_password_change = true
+# The app's code field accepts exactly six digits; pinning the length here keeps local behaviour
+# and the client from drifting apart silently.
+otp_length = 6
+# Matches what hosted Supabase's built-in sender enforces per address, and what `AuthView`'s
+# resend cooldown shows. The CLI's own default is 1s, which is short enough that a second send
+# usually succeeds locally and then fails in production — the opposite of a useful dev stack.
+max_frequency = "60s"
+
+# GoTrue's stock templates contain only `{{ .ConfirmationURL }}` — a link, no code. The app asks
+# for a typed six-digit code, so the templates must render `{{ .Token }}` or the code is never
+# sent anywhere and sign-in is impossible. Both templates are needed: GoTrue picks `confirmation`
+# for an address it has never seen and `magic_link` for one it has, and a returning user is the
+# common case.
+#
+# THE HOSTED PROJECT NEEDS THE SAME CHANGE, by hand: Dashboard → Authentication → Emails →
+# "Confirm signup" and "Magic Link" must both include {{ .Token }}. `supabase db push` does not
+# carry email templates.
+[auth.email.template.confirmation]
+subject = "Your CheekyPint code"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.magic_link]
+subject = "Your CheekyPint code"
+content_path = "./supabase/templates/magic_link.html"
 
 [auth.external.apple]
 enabled = true

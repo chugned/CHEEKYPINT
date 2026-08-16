@@ -52,6 +52,7 @@
 		5DFC91ABF83B6CCDCAC06166 /* FriendsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A39C87CFB49B270966A7716 /* FriendsRepository.swift */; };
 		5FA9B27853B3A2B1A9923C87 /* SessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78D9E7A31AEC03BBE7D49CE /* SessionController.swift */; };
 		60C1CA754117A072F6D185DB /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 93C8D775D6CB641A5C876957 /* PrivacyInfo.xcprivacy */; };
+		61BE2F1945FD9FF24C26B66D /* EmailOTPAuthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23B8FB090A870D79E9A42BD8 /* EmailOTPAuthTests.swift */; };
 		66FEE24D402E0551291B4B0D /* LeaderboardRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = F195336553E97CFAE69B74BD /* LeaderboardRepository.swift */; };
 		67D2581D727E7635247B3753 /* AddFriendView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC1D204FB60B2CB58469EAF2 /* AddFriendView.swift */; };
 		688B46723CE439F5EEE38758 /* PlacePickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0BA5446A6E4A869C6306A94 /* PlacePickerTests.swift */; };
@@ -93,6 +94,7 @@
 		BDB04FE7113D67D1D8A98CD7 /* demo-pint-portrait.png in Resources */ = {isa = PBXBuildFile; fileRef = 9833AC9790AF4C9613C1C2EC /* demo-pint-portrait.png */; };
 		BFBA9EEAAF2CBF212725A4CF /* EditProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A28C4771ADDE62DBDEE18120 /* EditProfileView.swift */; };
 		C49AF8863772058146A69379 /* FriendPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04363ACFD4B5C9A0A9F3E0EF /* FriendPreviewView.swift */; };
+		C82E2A29CB2939AEDBC63015 /* EmailCodeSignIn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95932BC98744C0C02FBF7237 /* EmailCodeSignIn.swift */; };
 		CC3E4C6D738D168F2608A01D /* FeedViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9BC8826EA795ACEF94BE379 /* FeedViewTests.swift */; };
 		CC4032FC0B02D6D6BDD8E0DC /* OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = 24E90E0D55EE2034A4DF282A /* OFL.txt */; };
 		CD7314E48500FE84FACD6E9B /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1612CB065F42E1A721267F9 /* HomeViewModel.swift */; };
@@ -156,6 +158,7 @@
 		1D6AFC9DE60A85058380FA9B /* PrivacySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacySettingsView.swift; sourceTree = "<group>"; };
 		22111C12A6569AAF398C360B /* PintPourView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PintPourView.swift; sourceTree = "<group>"; };
 		23B601655B3FB75D98071C7A /* ImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageLoader.swift; sourceTree = "<group>"; };
+		23B8FB090A870D79E9A42BD8 /* EmailOTPAuthTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailOTPAuthTests.swift; sourceTree = "<group>"; };
 		24E90E0D55EE2034A4DF282A /* OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = OFL.txt; sourceTree = "<group>"; };
 		282061BC407687DE47C5B16A /* SupabaseError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseError.swift; sourceTree = "<group>"; };
 		28E880C268F01EA897CD5EFD /* BlockedUsersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockedUsersView.swift; sourceTree = "<group>"; };
@@ -195,6 +198,7 @@
 		92B264CA1989F6776444F735 /* PubsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PubsView.swift; sourceTree = "<group>"; };
 		92F0B2D8EC8B2BE4982FB23A /* demo-pint.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "demo-pint.png"; sourceTree = "<group>"; };
 		93C8D775D6CB641A5C876957 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		95932BC98744C0C02FBF7237 /* EmailCodeSignIn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailCodeSignIn.swift; sourceTree = "<group>"; };
 		9833AC9790AF4C9613C1C2EC /* demo-pint-portrait.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "demo-pint-portrait.png"; sourceTree = "<group>"; };
 		9879D47ABAB68FD0138B436B /* ComposePostSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposePostSheet.swift; sourceTree = "<group>"; };
 		992A7152E72932A1AD45B8E7 /* DeleteAccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteAccountView.swift; sourceTree = "<group>"; };
@@ -331,6 +335,7 @@
 			isa = PBXGroup;
 			children = (
 				D693B5BFB92FFAF57CB2BC50 /* AuthView.swift */,
+				95932BC98744C0C02FBF7237 /* EmailCodeSignIn.swift */,
 				F73129C976C9C5C5DC90E494 /* OnboardingSupport.swift */,
 				03DFBC7601933D2488D79FE7 /* ProfileSetupFlowView.swift */,
 				D8956EEBDE28461F82148694 /* WelcomeFlowView.swift */,
@@ -567,6 +572,7 @@
 				5DB4A130E7E0B1AE5AF8C425 /* DebugFaultInjectorTests.swift */,
 				3790C1282D2C4B39809DB396 /* DeleteAccountWiringTests.swift */,
 				8431B3781C6DDB129D65C967 /* DemoComposeTests.swift */,
+				23B8FB090A870D79E9A42BD8 /* EmailOTPAuthTests.swift */,
 				1872FAFB6961D5A9CADF105A /* FeedPagingTests.swift */,
 				4C49867E1056C19580C9661C /* FeedRepositoryTests.swift */,
 				2E5EFD7C3D050A64AB9145D7 /* FeedViewModelTests.swift */,
@@ -782,6 +788,7 @@
 				0F1EB5B2BCFE06B38223733A /* DebugFaultInjectorTests.swift in Sources */,
 				AC2CCC69E150D6A237283A4A /* DeleteAccountWiringTests.swift in Sources */,
 				3698D7635FFEB1217ED4FC8F /* DemoComposeTests.swift in Sources */,
+				61BE2F1945FD9FF24C26B66D /* EmailOTPAuthTests.swift in Sources */,
 				EF477088B5EF2B3E9E798050 /* FeedPagingTests.swift in Sources */,
 				F74A4CE5753D52298F021FA9 /* FeedRepositoryTests.swift in Sources */,
 				E78FAFD4C9EF851833EA669B /* FeedViewModelTests.swift in Sources */,
@@ -820,6 +827,7 @@
 				2F4CB2FBE90F249EE29E9366 /* DemoWorld.swift in Sources */,
 				78BA3290D2CF7943C44E2865 /* DiaryRepository.swift in Sources */,
 				BFBA9EEAAF2CBF212725A4CF /* EditProfileView.swift in Sources */,
+				C82E2A29CB2939AEDBC63015 /* EmailCodeSignIn.swift in Sources */,
 				BA9349721E2626A898247C7E /* FeedPostCard.swift in Sources */,
 				9A777015E52EEC9DE7E64EE4 /* FeedRepository.swift in Sources */,
 				D9442B7DCBBB5D015978908B /* FeedView.swift in Sources */,

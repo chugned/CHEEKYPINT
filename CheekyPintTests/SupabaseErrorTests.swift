@@ -53,4 +53,60 @@ final class SupabaseErrorTests: XCTestCase {
         XCTAssertEqual(SupabaseError.from(status: 400, body: body(message: "nope", code: "P0002")), .notFound)
         XCTAssertEqual(SupabaseError.from(status: 403, body: body(message: "nope", code: "42501")), .forbidden)
     }
+
+    // MARK: - GoTrue's own error envelope
+    //
+    // Every body below is copied verbatim from a real local GoTrue v2.195.0 (`supabase start`,
+    // `curl` against :54321). `EmailOTPAuthTests` re-derives the same two failures against the
+    // running server, so if GoTrue changes its wire format these fixtures cannot silently rot
+    // into fiction — the live cases fail first.
+
+    private let goTrueRateLimit = Data(#"{"code":429,"error_code":"over_email_send_rate_limit","msg":"For security purposes, you can only request this after 47 seconds."}"#.utf8)
+    private let goTrueOTPExpired = Data(#"{"code":403,"error_code":"otp_expired","msg":"Token has expired or is invalid"}"#.utf8)
+
+    /// Why `fromAuth` had to exist at all. GoTrue's `code` is a *number*; PostgREST's is a string,
+    /// so decoding a GoTrue body as `PostgRESTError` throws outright and the whole payload is
+    /// lost. This asserts the broken behaviour deliberately: if someone later "simplifies" the
+    /// auth client back onto `from(status:body:)`, this test is the record of what that costs.
+    func testThePostgRESTMappingCannotReadAGoTrueBodyAtAll() {
+        XCTAssertEqual(SupabaseError.from(status: 429, body: goTrueRateLimit).friendlyMessage,
+                       "Something went wrong. Please try again.",
+                       "a throttled send read through the PostgREST mapping is indistinguishable " +
+                       "from any other server failure")
+        XCTAssertEqual(SupabaseError.from(status: 403, body: goTrueOTPExpired), .forbidden,
+                       "and a mistyped code becomes 'You don't have access to that'")
+    }
+
+    /// The remaining wait is only ever in the server's sentence — nothing on the client knows it —
+    /// so the hint has to carry it through to the screen.
+    func testGoTrueRateLimitKeepsTheServersOwnWaitSentence() {
+        let error = SupabaseError.fromAuth(status: 429, body: goTrueRateLimit)
+        XCTAssertEqual(error, .rateLimited(hint: "For security purposes, you can only request this after 47 seconds."))
+        XCTAssertTrue(error.friendlyMessage.contains("47 seconds"))
+    }
+
+    /// Flip point: map 403 before `error_code` in `fromAuth` and this returns `.forbidden`.
+    func testGoTrueOTPExpiredMapsToTheCodeCaseAndNotToForbidden() {
+        let error = SupabaseError.fromAuth(status: 403, body: goTrueOTPExpired)
+        XCTAssertEqual(error, .invalidOrExpiredCode)
+        XCTAssertNotEqual(error.friendlyMessage, SupabaseError.forbidden.friendlyMessage)
+    }
+
+    /// Also the guard on which decoder reads these: swap `SupabaseJSON.goTrueDecoder` for the
+    /// shared `SupabaseJSON.decoder` and its `.convertFromSnakeCase` rewrites `error_code` to
+    /// `errorCode` before `GoTrueError`'s explicit key can match it, so `error_code` reads as nil
+    /// and every GoTrue failure falls through to `.server`'s generic copy.
+    func testGoTrueValidationFailureSurfacesTheServersOwnSentence() {
+        let body = Data(#"{"code":400,"error_code":"validation_failed","msg":"Unable to validate email address: invalid format"}"#.utf8)
+        XCTAssertEqual(SupabaseError.fromAuth(status: 400, body: body),
+                       .validation("Unable to validate email address: invalid format"))
+    }
+
+    /// An auth failure with no shape we recognise must still not leak a raw server string.
+    func testAnUnrecognisedAuthFailureStillGetsTheGenericCopy() {
+        let body = Data(#"{"code":500,"error_code":"unexpected_failure","msg":"pq: connection reset"}"#.utf8)
+        let error = SupabaseError.fromAuth(status: 500, body: body)
+        XCTAssertEqual(error, .server(status: 500, message: "pq: connection reset"))
+        XCTAssertEqual(error.friendlyMessage, "Something went wrong. Please try again.")
+    }
 }

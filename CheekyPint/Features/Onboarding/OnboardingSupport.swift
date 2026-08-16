@@ -33,29 +33,49 @@ struct OnboardingScaffold<Content: View, Actions: View>: View {
         self.actions = actions
     }
 
+    /// Scrollable, but only when it has to be.
+    ///
+    /// The layout was a plain `VStack` with a trailing `Spacer`, which pins the actions to the
+    /// bottom and silently clips whatever doesn't fit above them. That is fine at default text
+    /// sizes for a title and one button, and not fine at accessibility XXL for the sign-in steps,
+    /// where a large title, a subtitle carrying the user's own email address, a field, a primary
+    /// button, an error line, a resend row and the three legal links all have to coexist.
+    ///
+    /// The content keeps a *minimum* height of one screenful — `minHeight`, deliberately, not
+    /// `containerRelativeFrame`, which sets an exact height and would go on clipping — so the
+    /// `Spacer` still pushes the actions to the bottom exactly as before when there is room, and
+    /// past that the `ScrollView` takes over instead of the overflow being cut off.
+    /// `.scrollBounceBehavior(.basedOnSize)` keeps the short screens feeling static rather than
+    /// rubber-banding on a screen with nothing to scroll.
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-            Spacer(minLength: Theme.Spacing.lg)
-            Image(systemName: systemImage)
-                .font(.system(size: 44, weight: .semibold))
-                .foregroundStyle(Theme.Palette.accent)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                Text(title)
-                    .font(Theme.Typography.largeTitle)
-                    .foregroundStyle(Theme.Palette.textPrimary)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(Theme.Typography.body)
-                        .foregroundStyle(Theme.Palette.textSecondary)
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    Spacer(minLength: Theme.Spacing.lg)
+                    Image(systemName: systemImage)
+                        .font(.system(size: 44, weight: .semibold))
+                        .foregroundStyle(Theme.Palette.accent)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                        Text(title)
+                            .font(Theme.Typography.largeTitle)
+                            .foregroundStyle(Theme.Palette.textPrimary)
+                        if let subtitle {
+                            Text(subtitle)
+                                .font(Theme.Typography.body)
+                                .foregroundStyle(Theme.Palette.textSecondary)
+                        }
+                    }
+                    content()
+                    Spacer(minLength: Theme.Spacing.lg)
+                    actions()
                 }
+                .padding(Theme.Spacing.lg)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: proxy.size.height, alignment: .top)
             }
-            content()
-            Spacer()
-            actions()
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .padding(Theme.Spacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .pubBackground()
     }
 }

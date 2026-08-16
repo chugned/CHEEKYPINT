@@ -183,7 +183,14 @@ struct ProfileSetupFlowView: View {
                 displayName: Self.sanitizer.sanitizeDisplayName(displayName),
                 city: cleanCity.isEmpty ? nil : cleanCity,
                 timezone: TimeZone.current.identifier,
-                locale: Locale.current.identifier
+                locale: Locale.current.identifier,
+                // The legal-age confirmation the user gave before signing in (§17's third screen,
+                // which is the only way to reach this flow) is written here, in the same PATCH as
+                // the name — see `SessionController.pendingAgeConfirmed`. Unconditional rather
+                // than gated on that in-memory flag, which is lost if the app is killed part-way
+                // through setup: gating on it would leave such a user permanently in `.onboarding`,
+                // since the column that ends this phase would never be filled in.
+                legalAgeConfirmedAt: Date()
             ))
             try await container.profiles.updatePrivacy(privacy.asUpdate())
             await session.completeOnboarding()
