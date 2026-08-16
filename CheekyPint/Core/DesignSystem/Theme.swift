@@ -20,6 +20,14 @@ enum Theme {
         /// for the logo lockup so the wordmark reads as the brand rather than as an action.
         static let forest = Color("ForestGreen")
         static let forestDeep = Color("ForestGreenDeep")
+        /// Fixed (non-adaptive) colours for `PhotoViewerView`'s full-bleed backdrop and its
+        /// overlaid controls (close button, "Photo unavailable" placeholder). Deliberately not
+        /// asset-catalog light/dark colours: every full-screen photo viewer convention
+        /// (Photos.app, and every major social feed) stages the photo against a neutral black
+        /// regardless of the app's own Light/Dark Mode, so the photo's own colours read
+        /// correctly against it either way.
+        static let photoViewerBackground = Color.black
+        static let photoViewerControl = Color.white
     }
 
     /// Brand gradients.

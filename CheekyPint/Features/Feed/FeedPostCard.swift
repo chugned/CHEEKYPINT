@@ -25,6 +25,7 @@ struct FeedPostCard: View {
     @State private var showingComments = false
     @State private var showingReport = false
     @State private var showingDeleteConfirmation = false
+    @State private var showingPhotoViewer = false
 
     /// Same route `MyQRView` already uses for "the signed-in user's own id"
     /// (`session.currentProfile?.id`) — not a new lookup invented for this card.
@@ -139,36 +140,56 @@ struct FeedPostCard: View {
     /// image's orientation.
     private static let photoHeight: CGFloat = 200
 
+    /// Tappable so the photo can be viewed full-screen (`PhotoViewerView`) instead of only ever
+    /// showing as this fixed-height, `.scaledToFill`-cropped tile — a portrait photo here is
+    /// necessarily a narrow cropped band, and until this there was no way to see the rest of it.
+    /// A real `Button`, not a bare `.onTapGesture`: this card lives inside a `List` row alongside
+    /// `CheersButton` and the comments button (`FeedView.swift:147`), and `docs/STATE_AUDIT.md`
+    /// records a real defect where a plain `Button` *without* an explicit `.buttonStyle` in that
+    /// same row let List's hit-testing route a tap to the wrong sibling control. `.buttonStyle
+    /// (.plain)` here matches both of that row's existing controls (and `FriendsView.pendingRow`'s
+    /// identical convention) so this third control gets its own independently hit-tested target
+    /// rather than risking that failure mode a third time.
+    ///
+    /// The whole tile — loading spinner, loaded photo, or `photoUnavailablePlaceholder` alike —
+    /// sits inside one `Button`, so SwiftUI collapses it to a single accessibility element
+    /// regardless of `RemoteImage`'s phase; the tile's own content is `.accessibilityHidden` and
+    /// the label/hint below are set once, directly on the `Button`, rather than trying to vary
+    /// them per phase (the honest per-phase distinction — e.g. "Photo could not be loaded" — still
+    /// exists, just inside `PhotoViewerView` once opened, not on this tile's tap target).
     @ViewBuilder
     private var photo: some View {
         if let imageURL {
-            RemoteImage(url: imageURL) { phase in
-                ZStack {
-                    Theme.Palette.backgroundPrimary
-                    switch phase {
-                    case .loading:
-                        ProgressView().tint(Theme.Palette.accent)
-                    case .success(let image):
-                        // The photo is the *content* of a photo post, not decoration — hiding it
-                        // would tell a blind user nothing about what they're cheering. Nothing in
-                        // the data model carries alt text to describe it honestly, so this names
-                        // it as the author's photo rather than fabricating a description or
-                        // staying silent. Contrast with the composer's own thumbnail preview
-                        // (`ComposePostSheet.swift`), which correctly stays `.accessibilityHidden`
-                        // — there, the user just picked the image themselves, so a label would be
-                        // telling them something they already know.
-                        image.resizable().scaledToFill()
-                            .accessibilityLabel("Photo posted by \(post.post.displayName)")
-                    case .failure:
-                        photoUnavailablePlaceholder
+            Button {
+                showingPhotoViewer = true
+            } label: {
+                RemoteImage(url: imageURL) { phase in
+                    ZStack {
+                        Theme.Palette.backgroundPrimary
+                        switch phase {
+                        case .loading:
+                            ProgressView().tint(Theme.Palette.accent)
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        case .failure:
+                            photoUnavailablePlaceholder
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity, minHeight: Self.photoHeight, maxHeight: Self.photoHeight)
+                // `.clipShape` alone clips rendering to the rounded-rect bounds established by the
+                // frame above; a preceding plain `.clipped()` (which clips to the same rectangular
+                // bounds) has no additional effect once `.clipShape` is present, so it's dropped.
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+                .accessibilityHidden(true)
             }
-            .frame(maxWidth: .infinity, minHeight: Self.photoHeight, maxHeight: Self.photoHeight)
-            // `.clipShape` alone clips rendering to the rounded-rect bounds established by the
-            // frame above; a preceding plain `.clipped()` (which clips to the same rectangular
-            // bounds) has no additional effect once `.clipShape` is present, so it's dropped.
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("feed-post-photo-\(post.id)")
+            .accessibilityLabel("Photo posted by \(post.post.displayName)")
+            .accessibilityHint("Opens the photo full screen")
+            .fullScreenCover(isPresented: $showingPhotoViewer) {
+                PhotoViewerView(imageURL: imageURL, authorName: post.post.displayName)
+            }
         }
     }
 

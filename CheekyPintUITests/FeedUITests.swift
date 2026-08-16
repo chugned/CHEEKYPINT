@@ -104,4 +104,58 @@ final class FeedUITests: XCTestCase {
         XCTAssertFalse(app.navigationBars["Comments"].exists,
                         "tapping Cheers must not spuriously open that post's comments sheet")
     }
+
+    /// The photo is a **third** tappable control added to `FeedPostCard`'s List row, alongside the
+    /// Cheers toggle and the comments button — see `docs/STATE_AUDIT.md` and the two tests above
+    /// for the real defect already found once in this exact row: a plain, un-styled `Button`
+    /// letting `List`'s hit-testing route a tap to the wrong sibling control. This proves the new
+    /// control doesn't reopen that failure mode: tapping Barnaby's seeded photo must open
+    /// `PhotoViewerView` and *only* that — not fire Cheers, not open Comments, not trigger the
+    /// post's overflow menu — and, the other direction, that the pre-existing Cheers/Comments
+    /// controls still do exactly what they did before this card grew a photo tap target.
+    @MainActor
+    func testFeedPhotoTapOpensViewerWithoutMisroutingOtherControls() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestDemo"]
+        app.launch()
+        app.tabBars.buttons["Feed"].tap()
+
+        // Barnaby's is the only seeded post with a photo (`DemoWorld.swift`), so this predicate
+        // matches exactly one control; its identifier is suffixed with the post's UUID, which a
+        // UI test has no way to predict, hence the prefix match rather than a literal string.
+        let photo = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'feed-post-photo-'")).firstMatch
+        XCTAssertTrue(photo.waitForExistence(timeout: 10), "Barnaby's seeded photo post needs a tappable photo")
+
+        let cheersBefore = app.buttons.matching(identifier: "cheers-toggle").element(boundBy: 1).label
+
+        photo.tap()
+
+        XCTAssertTrue(app.buttons["photo-viewer-close"].waitForExistence(timeout: 10),
+                      "tapping the photo should open PhotoViewerView, reachable via its close control")
+        XCTAssertFalse(app.navigationBars["Comments"].exists,
+                        "tapping the photo must not spuriously open that post's comments sheet")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'post-report-'")).firstMatch.exists,
+                        "tapping the photo must not spuriously open the post's overflow menu")
+        XCTAssertEqual(app.buttons.matching(identifier: "cheers-toggle").element(boundBy: 1).label, cheersBefore,
+                       "tapping the photo must not spuriously toggle Cheers")
+
+        app.buttons["photo-viewer-close"].tap()
+        XCTAssertTrue(app.buttons["photo-viewer-close"].waitForNonExistence(timeout: 5),
+                      "the close control should dismiss the viewer")
+
+        // The other direction: the pre-existing controls in this same row must still behave
+        // exactly as they did before the photo gained a tap target.
+        let cheers = app.buttons.matching(identifier: "cheers-toggle").element(boundBy: 1)
+        XCTAssertTrue(cheers.waitForExistence(timeout: 10))
+        let beforeToggle = cheers.label
+        cheers.tap()
+        XCTAssertNotEqual(cheers.label, beforeToggle,
+                          "the Cheers toggle must still work after the photo gained a tap target")
+        XCTAssertFalse(app.navigationBars["Comments"].exists,
+                        "Cheers must still not spuriously open Comments")
+
+        app.buttons.matching(identifier: "post-comments-button").firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Comments"].waitForExistence(timeout: 10),
+                      "the comments button must still open the comments sheet")
+    }
 }
