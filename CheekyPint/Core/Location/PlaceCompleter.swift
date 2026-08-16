@@ -81,6 +81,18 @@ final class PlaceCompleter: NSObject, MKLocalSearchCompleterDelegate {
         completer.delegate = self
     }
 
+    /// `BroadLocationField`'s init (`Core/Location/BroadLocationField.swift`): a broad-area field
+    /// has no use for point-of-interest suggestions — a business name is not a "broad area" any
+    /// more than a street address is — so it asks for `.address` alone rather than this type's
+    /// usual address+POI mix. A separate initializer rather than a default-valued parameter on
+    /// the one above, so `PlacePickerSheet`'s existing `PlaceCompleter()` call is untouched byte
+    /// for byte rather than resolving through a default argument.
+    init(resultTypes: MKLocalSearchCompleter.ResultType) {
+        super.init()
+        completer.resultTypes = resultTypes
+        completer.delegate = self
+    }
+
     nonisolated func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
         Task { @MainActor in
             self.results = self.completer.results

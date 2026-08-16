@@ -47,6 +47,17 @@ final class SessionController {
             await enterDemoMode()
             return
         }
+        // Deterministic entry into `ProfileSetupFlowView` for UI-test screenshots, with no
+        // backend involved: a fresh, unconfirmed profile is enough to land on `.onboarding`
+        // (`hasConfirmedLegalAge` is exactly `legalAgeConfirmedAt != nil`), and that screen's own
+        // `BroadLocationField` talks straight to MapKit, not Supabase, so nothing here needs
+        // `DemoWorld`. `-uiTestDemo` can't reach this screen itself — its seeded profile always
+        // carries a confirmed `legalAgeConfirmedAt` — and the real email-OTP flow that also
+        // reaches it needs a live local Supabase/GoTrue stack that isn't assumed to be running.
+        if ProcessInfo.processInfo.arguments.contains("-uiTestOnboarding") {
+            phase = .onboarding(Profile(id: UUID(), displayName: ""))
+            return
+        }
         #endif
         guard await container.auth.hasSession else {
             // No keychain session: nothing to restore. `deactivate()` rather than "leave it

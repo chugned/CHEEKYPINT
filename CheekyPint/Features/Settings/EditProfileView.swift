@@ -67,9 +67,7 @@ struct EditProfileView: View {
                                identifier: "edit-profile-bio-error")
             }
             Section {
-                TextField("e.g. Graz, Austria", text: $city)
-                    .accessibilityIdentifier("edit-profile-city")
-                    .accessibilityLabel("Broad location")
+                BroadLocationField(city: $city, identifier: "edit-profile-city")
                 tooLongMessage(city, allowNewlines: false, limit: ProfileTextSanitizer.cityMaxLength,
                                identifier: "edit-profile-city-error")
             } header: {

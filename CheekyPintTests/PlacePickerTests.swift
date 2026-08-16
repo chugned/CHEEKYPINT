@@ -3,8 +3,10 @@ import MapKit
 @testable import CheekyPint
 
 /// `PlacePickerSheet`'s pure logic: the free-text-is-always-valid rule, the shared 80-character
-/// label clamp, and the pub-vs-place category split. See `testNeitherFileDependsOnLocationPermissionAPIs`
-/// for the one behavioural test can't cover — the absence of a CoreLocation dependency.
+/// label clamp, and the pub-vs-place category split. See `testNoScannedFileDependsOnLocationPermissionAPIs`
+/// for the one behavioural test can't cover — the absence of a CoreLocation dependency. (See
+/// `BroadLocationFieldTests` for that shared field's own pure logic — the street-level filter and
+/// the locality/administrative-area/country reduction.)
 final class PlacePickerTests: XCTestCase {
     func testTypedTextAloneIsAValidPlace() {
         let place = PlacePickerSheet.freeTextPlace(from: "  Prague  ")
@@ -91,23 +93,28 @@ final class PlacePickerTests: XCTestCase {
     /// `PlaceCompleter`'s and `PlacePickerSheet`'s own header comments, which do exactly that and
     /// still pass).
     ///
-    /// The file set is every `.swift` file under `Features/Feed/` — discovered by enumerating the
-    /// directory at run time, not named one by one, so a new file added there is covered without
-    /// anyone remembering to update a list here — plus `PlaceCompleter.swift` by name.
-    /// `PlaceCompleter.swift` isn't swept in by directory the same way: it lives in
-    /// `Core/Location/`, right next to `LocationService.swift`, which legitimately uses every one
-    /// of these patterns for real; enumerating that whole directory would fail this test against
-    /// `LocationService.swift` itself — a correct file this requirement was never about.
+    /// The file set is every `.swift` file under `Features/Feed/`, `Features/Onboarding/`, and
+    /// `Features/Settings/` — each discovered by enumerating its directory at run time, not named
+    /// one by one, so a new file added under any of the three is covered without anyone
+    /// remembering to update a list here — plus `PlaceCompleter.swift` and
+    /// `BroadLocationField.swift` by name. Those two aren't swept in by directory the same way:
+    /// both live in `Core/Location/`, right next to `LocationService.swift`, which legitimately
+    /// uses every one of these patterns for real; enumerating that whole directory would fail
+    /// this test against `LocationService.swift` itself — a correct file this requirement was
+    /// never about. `Features/Onboarding/` and `Features/Settings/` were added for
+    /// `BroadLocationField`'s two call sites, `ProfileSetupFlowView.swift` and
+    /// `EditProfileView.swift` — before that field existed, this guard covered only
+    /// `Features/Feed/`, which neither of those two files lives under.
     ///
     /// **What this proves, and what it doesn't.** A pass means none of the patterns below appear,
     /// verbatim, in the files scanned, right now. It is a tripwire for the concrete violation
     /// shapes listed here, not a formal proof that no code path anywhere reaches CoreLocation's
     /// permission surface. It would miss, for instance: a dependency injected from a file outside
-    /// both the Feed directory and `PlaceCompleter.swift` (a new `Core/` helper called through a
-    /// name that matches none of these patterns), a local `typealias` renaming a forbidden type
-    /// before use, or the same capability reached via reflection or dynamic dispatch. Treat a
-    /// pass as "no known violation shape is present," not "this is impossible" — and extend the
-    /// pattern list the next time a new shape turns out to matter.
+    /// every directory and named file scanned here (a new `Core/` helper called through a name
+    /// that matches none of these patterns), a local `typealias` renaming a forbidden type before
+    /// use, or the same capability reached via reflection or dynamic dispatch. Treat a pass as "no
+    /// known violation shape is present," not "this is impossible" — and extend the pattern list
+    /// the next time a new shape turns out to matter.
     ///
     /// Concrete inputs that flip this test:
     /// - Reintroduce `@State private var location = LocationService()` into `PlacePickerSheet`
@@ -120,21 +127,39 @@ final class PlacePickerTests: XCTestCase {
     ///   `LocationService(`) and on `completer.region`. Verified by hand: applying this exact edit
     ///   turns this test red, naming `CLLocationCoordinate2D` in `PlacePickerSheet.swift` first;
     ///   reverting restores green.
-    func testNeitherFileDependsOnLocationPermissionAPIs() throws {
+    /// - Add `let manager = CLLocationManager()` anywhere in `BroadLocationField.swift` — contains
+    ///   `CLLocationManager(`. This is the concrete input that proves the *extension* itself
+    ///   (the two new enumerated directories, plus this named file) actually runs rather than only
+    ///   the original Feed/PlaceCompleter scan still passing by coincidence. Verified by hand:
+    ///   applying this edit turns this test red naming `BroadLocationField.swift`; reverting
+    ///   restores green — see this task's own report for the exact failure text.
+    func testNoScannedFileDependsOnLocationPermissionAPIs() throws {
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // PlacePickerTests.swift -> CheekyPintTests/
             .deletingLastPathComponent() // CheekyPintTests/ -> repo root
 
-        let feedDirectory = repoRoot.appendingPathComponent("CheekyPint/Features/Feed")
-        let feedFiles = try FileManager.default.contentsOfDirectory(
-            at: feedDirectory, includingPropertiesForKeys: nil
-        ).filter { $0.pathExtension == "swift" }
-        // An empty scan would pass for the wrong reason — silently checking nothing. Fail loudly
-        // instead if the directory ever turns up empty.
-        XCTAssertFalse(feedFiles.isEmpty, "expected to find .swift files under \(feedDirectory.path)")
+        let enumeratedDirectories = [
+            "CheekyPint/Features/Feed",
+            "CheekyPint/Features/Onboarding",
+            "CheekyPint/Features/Settings",
+        ]
+        var filesToScan: [URL] = []
+        for relativePath in enumeratedDirectories {
+            let directory = repoRoot.appendingPathComponent(relativePath)
+            let files = try FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: nil
+            ).filter { $0.pathExtension == "swift" }
+            // An empty scan would pass for the wrong reason — silently checking nothing. Fail
+            // loudly instead if a directory ever turns up empty.
+            XCTAssertFalse(files.isEmpty, "expected to find .swift files under \(directory.path)")
+            filesToScan.append(contentsOf: files)
+        }
 
-        let placeCompleter = repoRoot.appendingPathComponent("CheekyPint/Core/Location/PlaceCompleter.swift")
-        let filesToScan = feedFiles + [placeCompleter]
+        let namedFiles = [
+            "CheekyPint/Core/Location/PlaceCompleter.swift",
+            "CheekyPint/Core/Location/BroadLocationField.swift",
+        ]
+        filesToScan.append(contentsOf: namedFiles.map { repoRoot.appendingPathComponent($0) })
 
         let forbiddenPatterns = [
             "import CoreLocation",

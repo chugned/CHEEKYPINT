@@ -27,12 +27,34 @@ struct ProfileSetupFlowView: View {
             VStack(spacing: Theme.Spacing.lg) {
                 ProgressView(value: Double(step.rawValue + 1), total: Double(Step.allCases.count))
                     .tint(Theme.Palette.accent)
-                content
-                Spacer()
-                if let errorMessage {
-                    Text(errorMessage).font(Theme.Typography.caption).foregroundStyle(Theme.Palette.warning)
+                if step == .city {
+                    // `.city` is the one step whose content can outgrow the screen — a suggestion
+                    // list under `BroadLocationField` can grow tall enough, especially at
+                    // accessibility XXL (`docs/ACCESSIBILITY_AUDIT.md`'s own recorded failure mode
+                    // on these surfaces), to need real room to scroll into.
+                    //
+                    // Every other step keeps `actionBar` pinned outside a bare `Spacer()`-filled
+                    // area below `content`. Measured empirically: doing the same here left the
+                    // `ScrollView` squeezed to 44pt tall regardless of whether a sibling
+                    // `Spacer()` was present, its suggestion list existing in the hierarchy but
+                    // not actually on screen — there simply wasn't enough spare height once the
+                    // header, field, `actionBar` and keyboard all had to coexist in the space
+                    // above it. So for this step alone, `actionBar` moves *inside* the scroll
+                    // content instead of competing with it for a fixed outer slot — matching
+                    // `DataExportView`'s own precedent, whose submit button scrolls with its
+                    // content rather than staying pinned. Confirmed by re-screenshotting: the
+                    // suggestion list is reachable, and `isHittable`, after this change.
+                    ScrollView {
+                        VStack(spacing: Theme.Spacing.lg) {
+                            content
+                            errorAndActionBar
+                        }
+                    }
+                } else {
+                    content
+                    Spacer()
+                    errorAndActionBar
                 }
-                actionBar
             }
             .padding(Theme.Spacing.lg)
             .pubBackground()
@@ -66,13 +88,13 @@ struct ProfileSetupFlowView: View {
                     .onChange(of: pickedItem) { _, item in Task { await loadAvatar(item) } }
             }
         case .city:
+            // No `ScrollView` here — the body-level `if step == .city` branch supplies one that
+            // wraps this content together with `errorAndActionBar`, so `actionBar` scrolls with
+            // everything else instead of staying pinned in a slot this content has to compete for.
             field(title: "Where's your local? (optional)", systemImage: "mappin.and.ellipse") {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    TextField("e.g. Graz, Austria", text: $city)
-                        .textInputAutocapitalization(.words)
+                    BroadLocationField(city: $city, identifier: "profile-setup-city")
                         .textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier("profile-setup-city")
-                        .accessibilityLabel("Broad location")
                     tooLongMessage(city, allowNewlines: false,
                                    limit: ProfileTextSanitizer.cityMaxLength,
                                    identifier: "profile-setup-city-error")
@@ -84,6 +106,17 @@ struct ProfileSetupFlowView: View {
         case .privacy:
             PrivacyChoicesView(privacy: $privacy)
         }
+    }
+
+    /// The error text and `actionBar` together, factored out so both branches above (the plain
+    /// `Spacer()`-pinned layout every step but `.city` uses, and `.city`'s own scrolled layout)
+    /// render the identical pair rather than two hand-copied bodies drifting apart.
+    @ViewBuilder
+    private var errorAndActionBar: some View {
+        if let errorMessage {
+            Text(errorMessage).font(Theme.Typography.caption).foregroundStyle(Theme.Palette.warning)
+        }
+        actionBar
     }
 
     private var actionBar: some View {
