@@ -11,6 +11,7 @@ struct SettingsView: View {
         List {
             Section("Account") {
                 NavigationLink { EditProfileView() } label: { Label("Edit profile", systemImage: "person.text.rectangle") }
+                NavigationLink { PersonalHistoryView() } label: { Label("My diary", systemImage: "book.closed") }
                 Button { showSignOutConfirm = true } label: { Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right") }
                 NavigationLink { DeleteAccountView() } label: {
                     Label("Delete account", systemImage: "trash").foregroundStyle(Theme.Palette.warning)

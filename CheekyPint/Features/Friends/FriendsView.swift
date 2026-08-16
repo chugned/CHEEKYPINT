@@ -39,6 +39,7 @@ final class FriendsViewModel {
 struct FriendsView: View {
     @Environment(\.container) private var container
     @State private var model: FriendsViewModel?
+    @State private var showQR = false
 
     var body: some View {
         NavigationStack {
@@ -48,12 +49,20 @@ struct FriendsView: View {
             .pubBackground()
             .navigationTitle("Friends")
             .toolbar {
+                // "Here's my code, here's where I add yours" — My QR and Add-a-friend live side
+                // by side rather than My QR hanging off the unreachable `ProfileView`.
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink { AddFriendView() } label: { Image(systemName: "person.badge.plus") }
                         .accessibilityLabel("Add a friend")
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showQR = true } label: { Image(systemName: "qrcode") }
+                        .accessibilityIdentifier("friends-my-qr-button")
+                        .accessibilityLabel("My QR code")
+                }
             }
         }
+        .sheet(isPresented: $showQR) { MyQRView() }
         .task {
             if model == nil { model = FriendsViewModel(container: container) }
             await model?.load()

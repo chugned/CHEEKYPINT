@@ -34,6 +34,7 @@
 		322742751E501A3EF50F50D0 /* PubsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92B264CA1989F6776444F735 /* PubsView.swift */; };
 		3368B55AC99AE6EB55753290 /* ReportContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C417C695216C7E4003C958B2 /* ReportContentView.swift */; };
 		33CBB817E0DE3E6C7F0C00A5 /* PrivacySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D6AFC9DE60A85058380FA9B /* PrivacySettingsView.swift */; };
+		33D509187771D0D9BEB7CB0B /* FriendsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C0D1110D2C7A267C9A13796 /* FriendsUITests.swift */; };
 		3698D7635FFEB1217ED4FC8F /* DemoComposeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8431B3781C6DDB129D65C967 /* DemoComposeTests.swift */; };
 		3B78F2CB38ABD72DD1B1CDF4 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAF0554527952664ACD8CB3 /* MainTabView.swift */; };
 		3D794374FD18A3D493F6A463 /* CheekyPintApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 730EF203CA9747BBEC5A88DA /* CheekyPintApp.swift */; };
@@ -68,7 +69,6 @@
 		7927D515D35BAE7E090BF0ED /* PostCommentsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4BE1879C89A90579EB9C4DF /* PostCommentsViewModel.swift */; };
 		7CA93AAF8C71491685250483 /* PlacePickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E030490B2166C1EFC5965771 /* PlacePickerSheet.swift */; };
 		7FDBB9AD6DB13E0DDD92D43A /* ScreenshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41EBFE10658C54A9DC938EC4 /* ScreenshotTests.swift */; };
-		80D29C6B3EE43D5A636E5D13 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AA85C3CBCA4166E5CCFB23B /* ProfileView.swift */; };
 		8A273AD4FA7450ADF8F8DAAD /* ProfileRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A04B8A45B27EB5E594B5172 /* ProfileRepository.swift */; };
 		8B587A71D2A1C8BD5B106DED /* BlockedUsersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28E880C268F01EA897CD5EFD /* BlockedUsersView.swift */; };
 		8DAE93C1692BBD1C101E1255 /* ReportContentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EE6AEA2F988D4081AD90FA9 /* ReportContentTests.swift */; };
@@ -207,9 +207,9 @@
 		9879D47ABAB68FD0138B436B /* ComposePostSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposePostSheet.swift; sourceTree = "<group>"; };
 		992A7152E72932A1AD45B8E7 /* DeleteAccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteAccountView.swift; sourceTree = "<group>"; };
 		9A04B8A45B27EB5E594B5172 /* ProfileRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileRepository.swift; sourceTree = "<group>"; };
-		9AA85C3CBCA4166E5CCFB23B /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		9B72B647981FEDEA8D2B14AD /* FeedUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedUITests.swift; sourceTree = "<group>"; };
 		9B8159546E6EE1303F51FF3E /* FeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedView.swift; sourceTree = "<group>"; };
+		9C0D1110D2C7A267C9A13796 /* FriendsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsUITests.swift; sourceTree = "<group>"; };
 		9C2C1D4B2D469AED28873614 /* AccessibilityAnnouncerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityAnnouncerTests.swift; sourceTree = "<group>"; };
 		9D36B61D465CF9EFB0F4763B /* LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationService.swift; sourceTree = "<group>"; };
 		9FE2EBAF2631120634D10BD9 /* LegalDocumentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalDocumentView.swift; sourceTree = "<group>"; };
@@ -279,7 +279,6 @@
 			children = (
 				C77AFE875ADF240F7229377C /* FriendProfileView.swift */,
 				0F90FE5789EFAAB44E55D781 /* PersonalHistoryView.swift */,
-				9AA85C3CBCA4166E5CCFB23B /* ProfileView.swift */,
 			);
 			path = Profiles;
 			sourceTree = "<group>";
@@ -610,6 +609,7 @@
 			isa = PBXGroup;
 			children = (
 				9B72B647981FEDEA8D2B14AD /* FeedUITests.swift */,
+				9C0D1110D2C7A267C9A13796 /* FriendsUITests.swift */,
 				ABC3041556D23C7B3E1BFCE4 /* OnboardingUITests.swift */,
 				41EBFE10658C54A9DC938EC4 /* ScreenshotTests.swift */,
 			);
@@ -873,7 +873,6 @@
 				33CBB817E0DE3E6C7F0C00A5 /* PrivacySettingsView.swift in Sources */,
 				8A273AD4FA7450ADF8F8DAAD /* ProfileRepository.swift in Sources */,
 				4CF30A52F82837FBC69369B7 /* ProfileSetupFlowView.swift in Sources */,
-				80D29C6B3EE43D5A636E5D13 /* ProfileView.swift in Sources */,
 				FB3A90802981976CA3C3AB2A /* PubPickerView.swift in Sources */,
 				9093D3D6992A8521E0468EDE /* PubsRepository.swift in Sources */,
 				322742751E501A3EF50F50D0 /* PubsView.swift in Sources */,
@@ -903,6 +902,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				2D0C72985C3E2632DA6C069B /* FeedUITests.swift in Sources */,
+				33D509187771D0D9BEB7CB0B /* FriendsUITests.swift in Sources */,
 				0B9B73CFD859100B04133E70 /* OnboardingUITests.swift in Sources */,
 				7FDBB9AD6DB13E0DDD92D43A /* ScreenshotTests.swift in Sources */,
 			);

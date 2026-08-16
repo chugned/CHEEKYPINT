@@ -1,8 +1,9 @@
 import SwiftUI
 import CheekyPintCore
 
-/// The deliberately small CheekyPint experience: log beers, see the leaderboard, and manage
-/// settings. Pub discovery, sessions, profiles, and friend-management are not part of this UI.
+/// Logger, Feed, Leaderboard, Friends, and Settings. Pub discovery and sessions are not part of
+/// this UI. Friends gates the feed (friends-only posts), the leaderboard, and @mention
+/// autocomplete, so it gets a top-level tab rather than being buried behind another screen.
 struct MainTabView: View {
     @Environment(SessionController.self) private var session
     @State private var selection = 0
@@ -25,18 +26,23 @@ struct MainTabView: View {
             .tabItem { Label("Leaderboard", systemImage: "trophy.fill") }
             .tag(2)
 
+            // `FriendsView` wraps itself in its own `NavigationStack` (like `HomeView`/`FeedView`
+            // above), so it is placed directly here rather than wrapped again — an outer
+            // `NavigationStack` around an already self-wrapping view would double-nest.
+            FriendsView()
+                .tabItem { Label("Friends", systemImage: "person.2.fill") }
+                .tag(3)
+
             NavigationStack {
                 SettingsView()
             }
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-            .tag(3)
+            .tag(4)
         }
         .tint(Theme.Palette.accent)
     }
 }
 
-// Some legacy friend views remain in the target for source compatibility even though they are
-// no longer reachable from the app shell.
 extension FriendToken: @retroactive Identifiable {
     public var id: String { rawValue }
 }
