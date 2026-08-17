@@ -44,6 +44,21 @@ In Xcode: `⌘U` on the **CheekyPint** scheme.
 - `CheekyPintUITests` — onboarding (age gate not pre-checked); extend with log/undo, add-friend,
   privacy, and delete-account flows.
 
+### Offline vs. live cases
+
+Almost every UI case launches with `-uiTestDemo` and needs no backend. Three do need one, and
+they say so rather than hanging: `OnboardingUITests`' two email-OTP cases and
+`FriendFlowUITests`, which signs two brand-new accounts in against 127.0.0.1:54321 and reads
+their one-time codes out of the Mailpit inbox on :54324. Each begins with an `XCTSkipUnless` on
+a health probe of those two ports, so without `supabase start` they skip in well under a second
+with a message naming the command to run.
+
+`FriendFlowUITests` is the only case that creates *real* sessions, so it launches the app with
+`-uiTestKeychainService <per-run name>` (see `AppContainer.launchKeychain()`) and its sessions
+land in a throwaway Keychain service instead of `app.cheekypint.session` — otherwise the next
+suite to launch the app would find itself signed in and every onboarding case would fail for
+reasons nothing in it explains.
+
 Recommended CI: run (1) and (2) on every PR (no Xcode needed for the domain smoke via `corecheck`,
 Postgres for the backend), and (3) on macOS runners with Xcode 16.
 

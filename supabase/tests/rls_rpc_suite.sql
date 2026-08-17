@@ -105,6 +105,43 @@ do $$ declare v jsonb; begin
   raise notice 'PASS t6: friend token resolves to safe preview (Alice)';
 end $$;
 
+-- t6b guards the half of resolve_friend_token that t6 above structurally cannot reach.
+--
+-- t6 calls the function from psql, where the transaction is read-write and its rate-limit INSERT
+-- is perfectly legal. PostgREST does not do that: it picks the transaction mode from the
+-- function's declared volatility — VOLATILE gets read-write, STABLE/IMMUTABLE gets READ ONLY.
+-- `resolve_friend_token` shipped as STABLE while calling `enforce_rate_limit`, which INSERTs into
+-- `rate_limit_events`, so every call over the API — the only way any client ever calls it — died
+-- with SQLSTATE 25006, "cannot execute INSERT in a read-only transaction" (HTTP 405). t6 passed
+-- the entire time. Nobody could add a friend by code or QR, which is the only route into
+-- `send_friend_request`, so no two accounts could become friends at all.
+--
+-- Catalogue-level, and deliberately over the whole schema rather than over one name: the bug is a
+-- property of the pairing (writes + non-volatile), and any future RPC that takes a rate limit is
+-- one `stable` keyword away from the same silent, API-only failure.
+--
+-- Flip point: `alter function public.resolve_friend_token(text) stable;` before this block and it
+-- raises, naming the function.
+do $$ declare offenders text; begin
+  select string_agg(p.proname::text || ' (provolatile=' || p.provolatile::text || ')',
+                    ', ' order by p.proname::text)
+    into offenders
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.provolatile::text <> 'v'
+    and (p.prosrc ~ 'enforce_rate_limit'
+         or p.prosrc ~* 'insert into public\.'
+         or p.prosrc ~* 'update public\.'
+         or p.prosrc ~* 'delete from public\.');
+  if offenders is not null then
+    raise exception 'FAIL t6b: % write but are not VOLATILE. PostgREST runs a STABLE/IMMUTABLE '
+                    'function in a READ ONLY transaction, so every call over the API fails with '
+                    'SQLSTATE 25006 while direct SQL calls like t6 keep passing', offenders;
+  end if;
+  raise notice 'PASS t6b: every writing RPC is VOLATILE, so PostgREST gives it a read-write transaction';
+end $$;
+
 do $$ declare a jsonb; b jsonb; cnt int; begin
   a := public.create_pint_entry('idem-x', now(), 'pint');
   b := public.create_pint_entry('idem-x', now(), 'pint');

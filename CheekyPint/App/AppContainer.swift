@@ -16,11 +16,34 @@ struct AppContainer: Sendable {
     /// `SupabaseAuth` built on a per-test Keychain service; the app never passes anything.
     init(config: AppConfig = .current, analytics: any AnalyticsService = NoOpAnalytics(),
          auth: SupabaseAuth? = nil) {
-        let auth = auth ?? SupabaseAuth(config: config)
+        let auth = auth ?? SupabaseAuth(config: config, keychain: Self.launchKeychain())
         self.config = config
         self.auth = auth
         self.data = SupabaseData(config: config, auth: auth)
         self.analytics = analytics
+    }
+
+    /// The Keychain the app's own `SupabaseAuth` persists into — `app.cheekypint.session` in every
+    /// build, except when a DEBUG launch names another one.
+    ///
+    /// The escape hatch exists for `FriendFlowUITests`, the one UI test that signs real users all
+    /// the way in. A UI test drives the *app's* process, so it cannot inject an `auth` the way the
+    /// unit-test bundle does (see the note on `init`'s `auth` parameter) — it can only pass launch
+    /// arguments. Without this, that test would leave a live session under the app's own service
+    /// name, and `OnboardingUITests`, which expects the welcome screen, would launch straight into
+    /// `MainTabView` on the next run and fail for reasons nothing in it explains.
+    ///
+    /// DEBUG-only and opt-in by an argument no shipped launch passes, alongside the existing
+    /// `-uiTestDemo` / `-uiTestOnboarding` hatches in `SessionController.bootstrap()`.
+    private static func launchKeychain() -> KeychainStore {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let flag = arguments.firstIndex(of: "-uiTestKeychainService"),
+           arguments.indices.contains(flag + 1) {
+            return KeychainStore(service: arguments[flag + 1])
+        }
+        #endif
+        return KeychainStore()
     }
 
     var profiles: ProfileRepository { ProfileRepository(data: data) }

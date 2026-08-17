@@ -1,0 +1,29 @@
+-- CheekyPint: resolve_friend_token must be VOLATILE.
+--
+-- `20260101000800_rpc_social.sql:42` declares `public.resolve_friend_token(text)` STABLE, and its
+-- second statement (`:53`) is `perform public.enforce_rate_limit('friend_token_resolve', ...)`,
+-- which INSERTs a row into `public.rate_limit_events` (`20260101000600_security_helpers.sql:125`).
+--
+-- Those two facts cannot coexist over the API. PostgREST decides how to open the transaction for
+-- an RPC from the function's declared volatility: a VOLATILE function gets a read-write
+-- transaction, a STABLE or IMMUTABLE one gets a read-only transaction. So every call to
+-- `resolve_friend_token` through PostgREST reached its rate-limit INSERT inside a read-only
+-- transaction and died there:
+--
+--     HTTP 405  {"code":"25006","message":"cannot execute INSERT in a read-only transaction"}
+--
+-- which `SupabaseError.from` maps to `.server(...)`, and `FriendPreviewView` renders as
+-- "Couldn't find that code / Something went wrong. Please try again." — the same screen a
+-- genuinely bad code produces. Resolving a friend code or a scanned QR therefore could never
+-- succeed for anybody, and since that is the only way to reach `send_friend_request`, no two
+-- accounts could ever become friends. Nothing caught it because the SQL suite calls the function
+-- directly (`supabase/tests/rls_rpc_suite.sql` t6), where the transaction is read-write and the
+-- INSERT is perfectly legal — the defect only exists in PostgREST's execution context, and the
+-- client had never called it before `FriendFlowUITests`.
+--
+-- The function *is* volatile: it writes. `alter function` rather than a second `create or replace`
+-- of the body, so there is only ever one copy of that body in the repo to keep in step. Anything
+-- that recreates this function later must not reintroduce STABLE — `rls_rpc_suite.sql` t6b fails
+-- the build if it does, for this function or any other that calls `enforce_rate_limit`.
+
+alter function public.resolve_friend_token(text) volatile;
