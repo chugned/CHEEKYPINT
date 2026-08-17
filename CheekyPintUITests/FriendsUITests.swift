@@ -67,4 +67,77 @@ final class FriendsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Copy code"].waitForExistence(timeout: 10),
                       "MyQRView should resolve to a real code, not stay loading or errored")
     }
+
+    /// After the friend-preview sheet is dismissed, the tab bar must still be tappable.
+    ///
+    /// Typing a code into `AddFriendView`'s manual field makes that `TextField` first responder.
+    /// UIKit restores first responder when a modal it presented goes away, so dismissing the
+    /// preview sheet used to bring the keyboard straight back up — over the tab bar. A tab button
+    /// underneath the keyboard is present and `isHittable`-looking but computes a hit point of
+    /// `{-1, -1}`, so `tap()` lands nowhere and the tab never changes. The user was stuck too.
+    ///
+    /// Demo mode is what makes this offline and quick: `FriendsRepository.resolveToken` short-
+    /// circuits to a local fixture ("A new mate"), so the sheet presents with no network at all.
+    /// The same state is reached against a real backend in `FriendFlowUITests`, which stopped
+    /// needing its back-navigation workaround once this was fixed.
+    @MainActor
+    func testTabBarStaysTappableAfterTheFriendPreviewSheetIsDismissed() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestDemo"]
+        app.launch()
+
+        app.tabBars.buttons["Friends"].tap()
+        let addFriend = app.buttons["Add a friend"]
+        XCTAssertTrue(addFriend.waitForExistence(timeout: 10), "Friends needs an Add-a-friend control")
+        addFriend.tap()
+
+        // Typing, not pasting: it is the keyboard this raises that the bug was about.
+        let field = app.textFields["Paste a friend code or link"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "Add a mate needs a manual-code field")
+        field.tap()
+        // 32 base64url characters — `FriendToken.init?(rawValue:)` rejects anything shorter than
+        // 16 or outside that alphabet, and `resolve(_:)` would then set `errorMessage` and never
+        // present the sheet, so this test would pass without ever reaching the state it is about.
+        let code = "AbCdEfGhIjKlMnOpQrStUvWxYz012345"
+        field.typeText(code)
+        XCTAssertEqual(field.value as? String, code,
+                       "the manual-code field did not receive what was typed, so no keyboard was " +
+                       "ever raised and this test would prove nothing")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10),
+                      "typing into the manual-code field must raise a keyboard — without one " +
+                      "there is nothing for the sheet's dismissal to restore and no bug to catch")
+
+        app.buttons["Find friend"].tap()
+        XCTAssertTrue(app.staticTexts["A new mate"].waitForExistence(timeout: 10),
+                      "the code should resolve to DemoWorld's preview fixture")
+        app.buttons["Close"].tap()
+        XCTAssertTrue(app.staticTexts["A new mate"].waitForNonExistence(timeout: 10),
+                      "Close must dismiss the friend-preview sheet")
+
+        // The state the bug produced. Read this attachment: before the fix it shows the keyboard
+        // sitting over the tab bar.
+        snap("40-add-a-mate-after-preview-dismissed")
+
+        // THE assertion. Not "the tab button exists" — it always did, keyboard or not. The tab
+        // must actually become the selected one, which is exactly what a tap at {-1, -1} fails
+        // to do.
+        let settingsTab = app.tabBars.buttons["Settings"]
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 10), "the app should have a Settings tab")
+        settingsTab.tap()
+        XCTAssertTrue(settingsTab.wait(for: \.isSelected, toEqual: true, timeout: 10),
+                      "tapping the Settings tab after dismissing the friend preview did not " +
+                      "select it — the manual-code field's keyboard is back over the tab bar and " +
+                      "the tap resolved to hit point {-1, -1}")
+        // And the tab genuinely switched screens, not merely repainted its button.
+        XCTAssertTrue(app.buttons["Sign out"].waitForExistence(timeout: 10),
+                      "the Settings tab reported itself selected but SettingsView never appeared")
+        snap("41-settings-tab-after-preview-dismissed")
+    }
+
+    private func snap(_ name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
 }

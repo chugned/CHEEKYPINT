@@ -10,6 +10,11 @@ struct AddFriendView: View {
     @State private var resolvedToken: FriendToken?
     @State private var errorMessage: String?
 
+    /// Which field, if any, currently holds the keyboard. Read only by `present(_:)`, which
+    /// clears it — see the note there for why that has to happen before the sheet, not after it.
+    @FocusState private var focusedField: Field?
+    private enum Field: Hashable { case manualCode }
+
     var body: some View {
         List {
             Section {
@@ -27,6 +32,7 @@ struct AddFriendView: View {
                 TextField("Paste a friend code or link", text: $manualCode)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .focused($focusedField, equals: .manualCode)
                 Button("Find friend") { resolveManual() }
                     .disabled(manualCode.trimmingCharacters(in: .whitespaces).isEmpty)
             }
@@ -84,11 +90,32 @@ struct AddFriendView: View {
     private func resolve(_ input: String) {
         errorMessage = nil
         if let url = URL(string: input), case let .addFriend(token)? = container.deepLinkParser.parse(url) {
-            resolvedToken = token
+            present(token)
         } else if let token = FriendToken(rawValue: input) {
-            resolvedToken = token
+            present(token)
         } else {
+            // Deliberately does *not* clear `focusedField`: a code that didn't parse is a code the
+            // user still has to correct, so the keyboard stays where they need it.
             errorMessage = "That doesn't look like a valid friend code."
         }
+    }
+
+    /// The one place the preview sheet is presented — and the keyboard is given up *here*, before
+    /// the presentation, rather than anywhere in the dismissal.
+    ///
+    /// UIKit restores first responder when a modal it presented goes away. So a `TextField` that
+    /// was still focused when the sheet went up gets its keyboard back the instant the preview is
+    /// closed, and that keyboard (`{{0,583},{402,233}}`) sits over the whole tab bar (the Settings
+    /// tab is at `{{303,795},{74,54}}`): every tab button then computes a hit point of `{-1,-1}`
+    /// and swallows the tap, leaving a real user stuck on this screen until they scroll or
+    /// navigate. Resigning before presenting means there is nothing left for UIKit to restore,
+    /// which is why this needs no delay, no `onDismiss` hook and no threshold to tune — the
+    /// keyboard cannot come back from a first responder that no longer exists.
+    ///
+    /// Both routes in — a scanned QR (`handleScanned`) and a typed/pasted code (`resolveManual`) —
+    /// funnel through here, so neither can present the sheet with the field still focused.
+    private func present(_ token: FriendToken) {
+        focusedField = nil
+        resolvedToken = token
     }
 }

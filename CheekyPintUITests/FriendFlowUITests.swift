@@ -138,16 +138,15 @@ final class FriendFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Request sent"].exists)
         app.buttons["Done"].tap()
 
-        // Back out to the Friends list, which is where a user goes next anyway — and, less
-        // obviously, the only thing that ends the manual-code field's keyboard. Dismissing the
-        // preview sheet restores focus to that field, and its keyboard covers the tab bar
-        // (keyboard {{0,583},{402,233}} over the Settings tab at {{303,795},{74,54}}), so the very
-        // next `openTab` computed a hit point of {-1,-1} and tapped nothing at all.
-        XCTAssertTrue(app.navigationBars["Add a mate"].waitForExistence(timeout: 20),
-                      "Done must dismiss the preview back to Add a mate")
-        app.navigationBars["Add a mate"].buttons["BackButton"].tap()
-        XCTAssertTrue(app.navigationBars["Friends"].waitForExistence(timeout: 20),
-                      "back from Add a mate must return to the Friends list")
+        // Straight from the dismissed preview to another tab, with no back-navigation in between.
+        // That used to be impossible: dismissing the preview sheet restored first responder to the
+        // manual-code field, and its keyboard ({{0,583},{402,233}}) covered the whole tab bar (the
+        // Settings tab is at {{303,795},{74,54}}), so `signOut`'s own `openTab("Settings")`
+        // computed a hit point of {-1,-1} and tapped nothing. This test used to back out to the
+        // Friends list first purely to get rid of that keyboard; `AddFriendView.present(_:)` now
+        // resigns focus *before* presenting, so there is nothing to restore and the workaround is
+        // gone — which makes the `openTab` below a live-backend guard on that fix, alongside
+        // `FriendsUITests.testTabBarStaysTappableAfterTheFriendPreviewSheetIsDismissed`.
         signOut()
 
         // ─── A, second session: accept ──────────────────────────────────────────────────────
@@ -343,10 +342,16 @@ final class FriendFlowUITests: XCTestCase {
         return (field.value as? String) ?? ""
     }
 
+    /// Taps a tab and proves it became the selected one. "The button exists" is not enough: a tab
+    /// button under the keyboard exists, reads as hittable, and still swallows every tap (hit point
+    /// `{-1,-1}`), which is exactly how the friend-preview keyboard bug used to strand this test.
     private func openTab(_ name: String) {
         let tab = app.tabBars.buttons[name]
         XCTAssertTrue(tab.waitForExistence(timeout: 30), "the app should have a \(name) tab")
         tab.tap()
+        XCTAssertTrue(tab.wait(for: \.isSelected, toEqual: true, timeout: 20),
+                      "tapping the \(name) tab did not select it — the tap landed on nothing, " +
+                      "which is what happens when a keyboard is covering the tab bar")
     }
 
     private func signOut() {
